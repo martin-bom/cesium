@@ -101,7 +101,7 @@ export default function GltfLoader(options) {
   this._incrementallyLoadTextures = incrementallyLoadTextures;
   this._gltfJsonLoader = undefined;
   this._state = ResourceLoaderState.UNLOADED;
-  this._finalize = false;
+  this._texturesLoaded = false;
   this._promise = when.defer();
   this._texturesLoadedPromise = when.defer();
 
@@ -1125,8 +1125,7 @@ function parse(loader, gltf, supportedImageFormats, frameState) {
       if (loader.isDestroyed()) {
         return;
       }
-
-      loader._readyToFinalize = true;
+      loader._state = GltfLoaderState.READY_TO_FINALIZE;
     })
     .otherwise(function (error) {
       if (loader.isDestroyed()) {
@@ -1139,6 +1138,7 @@ function parse(loader, gltf, supportedImageFormats, frameState) {
     if (loader.isDestroyed()) {
       return;
     }
+    loader._texturesLoaded = true;
     loader._texturesLoadedPromise.resolve(loader);
   });
 }
@@ -1302,6 +1302,13 @@ function unloadGeometry(loader) {
   loader._geometryLoaders.length = 0;
 }
 
+function unloadFeatureMetadata(loader) {
+  if (defined(loader._featureMetadataLoader)) {
+    loader._featureMetadataLoader.destroy();
+    loader._featureMetadataLoader = undefined;
+  }
+}
+
 /**
  * Unloads the resource.
  * @private
@@ -1315,11 +1322,7 @@ GltfLoader.prototype.unload = function () {
   unloadTextures(this);
   unloadBufferViews(this);
   unloadGeometry(this);
-
-  if (defined(this._featureMetadataLoader)) {
-    this._featureMetadataLoader.destroy();
-    this._featureMetadataLoader = undefined;
-  }
+  unloadFeatureMetadata(this);
 
   this._components = undefined;
 };

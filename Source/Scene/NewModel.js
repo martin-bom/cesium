@@ -5,12 +5,20 @@ import ComponentDatatype from "../Core/ComponentDatatype.js";
 import defaultValue from "../Core/defaultValue.js";
 import defined from "../Core/defined.js";
 import ManagedArray from "../Core/ManagedArray.js";
+import Matrix4 from "../Core/Matrix4.js";
+import oneTimeWarning from "../Core/oneTimeWarning.js";
 import Resource from "../Core/Resource.js";
+import Buffer from "../Renderer/Buffer.js";
+import BufferUsage from "../Renderer/BufferUsage.js";
 import numberOfComponentsForType from "../ThirdParty/GltfPipeline/numberOfComponentsForType.js";
 import when from "../ThirdParty/when.js";
 import GltfLoader from "./GltfLoader.js";
+import AttributeType from "./AttributeType.js";
 import MetadataType from "./MetadataType.js";
+import ModelComponents from "./ModelComponents.js";
 import SceneMode from "./SceneMode.js";
+
+var Attribute = ModelComponents.Attribute;
 
 var ModelState = {
   UNLOADED: 0,
@@ -118,6 +126,7 @@ Model.fromGltf = function (options) {
   // TODO: this can have different interpolations: https://github.com/CesiumGS/3d-tiles-next/issues/15
   // TODO: random per-vertex attributes could be draco encoded. so could per-vertex metadata. so min/max metadata is required to support
   // TODO: most other stuff can be baked in the model matrix, normal matrix, tangent matrix
+  // TODO: ability to unload metadata from CPU like for point clouds
   options = defined(options) ? options : defaultValue.EMPTY_OBJECT;
 
   var url = options.url;
@@ -242,6 +251,142 @@ function getBoundingSphere(positionAttribute) {
   return BoundingSphere.fromCornerPoints(min, max);
 }
 
+function isVertexAttributeSupported(property) {
+  var type = property.type;
+  var enumType = property.enumType;
+  var valueType = property.valueType;
+  var componentCount = property.componentCount;
+
+  if (
+    type === MetadataType.ARRAY &&
+    (!defined(componentCount) || componentCount > 4)
+  ) {
+    // Variable-size arrays or arrays with more than 4 components are not supported
+    return false;
+  }
+
+  if (defined(enumType)) {
+    // Enums or arrays of enums are not supported
+    return false;
+  }
+
+  if (valueType === MetadataType.STRING) {
+    // Strings or arrays of strings are not supported
+    return false;
+  }
+
+  return true;
+}
+
+function isVertexAttributeLossy(property) {
+  // WebGL does not support vertex attributes with these types
+  var valueType = property.valueType;
+  return (
+    valueType === MetadataType.UINT32 ||
+    valueType === MetadataType.UINT64 ||
+    valueType === MetadataType.INT32 ||
+    valueType === MetadataType.INT64 ||
+    valueType === MetadataType.FLOAT64
+  );
+}
+
+var attributeTypes = [
+  AttributeType.SCALAR,
+  AttributeType.VEC2,
+  AttributeType.VEC3,
+  AttributeType.VEC4,
+];
+
+function getMetadataVertexAttributes(
+  primitive,
+  vertexCount,
+  featureMetadata,
+  frameState
+) {
+  // Convert per-vertex metadata to vertex buffers. Mainly applicable to point clouds.
+  var metadataVertexAttributes = [];
+  var featureIdAttributes = primitive.featureIdAttributes;
+  var featureIdAttributesLength = featureIdAttributes.length;
+  for (var i = 0; i < featureIdAttributesLength; ++i) {
+    var featureIdAttribute = featureIdAttributes[i];
+    var featureTableId = featureIdAttribute.featureTable;
+    var featureTable = featureMetadata.getFeatureTable(featureTableId);
+    var featureTableClass = featureTable.class;
+    var semantic = featureIdAttribute.semantic;
+    var divisor = featureIdAttribute.divisor;
+    var constant = featureIdAttribute.constant;
+    if (defined(semantic) || divisor !== 1) {
+      continue;
+    }
+    var propertyIds = featureTable.getPropertyIds(0);
+    var propertyIdsLength = propertyIds.length;
+    for (var j = 0; j < propertyIdsLength; ++j) {
+      var propertyId = propertyIds[j];
+      var typedArray = featureTable.getPropertyTypedArray(propertyId);
+      if (!defined(typedArray)) {
+        continue;
+      }
+      var property = featureTableClass.properties[propertyId];
+      if (!isVertexAttributeSupported(property)) {
+        continue;
+      }
+      var componentCount = property.componentCount; // TODO: check if defined for scalars
+      var startOffset = constant * componentCount;
+      var endOffset = startOffset + vertexCount * componentCount;
+      typedArray = typedArray.subarray(startOffset, endOffset);
+      if (isVertexAttributeLossy(property)) {
+        oneTimeWarning(
+          "Cast metadata property to floats",
+          'Metadata property "' +
+            propertyId +
+            '" will be casted to a float array because UINT32, UINT64, INT32, INT64, and FLOAT64 are not valid WebGL vertex attribute types. Some precision may be lost.'
+        );
+        typedArray = new Float32Array(typedArray);
+      }
+
+      var vertexBuffer = Buffer.createVertexBuffer({
+        typedArray: typedArray,
+        context: frameState.context,
+        usage: BufferUsage.STATIC_DRAW,
+      });
+      vertexBuffer.vertexArrayDestroyable = false;
+
+      var componentDatatype = ComponentDatatype.fromTypedArray(typedArray);
+
+      var attribute = new Attribute();
+      attribute.semantic = propertyId;
+      attribute.constant = undefined;
+      attribute.componentDatatype = componentDatatype;
+      attribute.normalized = property.normalized;
+      attribute.count = vertexCount;
+      attribute.type = attributeTypes[componentCount];
+      attribute.min = undefined;
+      attribute.max = undefined;
+      attribute.byteOffset = 0;
+      attribute.byteStride = undefined;
+      attribute.buffer = vertexBuffer;
+
+      metadataVertexAttributes.push(attribute);
+    }
+  }
+
+  return metadataVertexAttributes;
+}
+
+function RuntimeNode() {
+  this._computedMatrix = Matrix4.clone(Matrix4.IDENTITY);
+  this._commands = [];
+}
+
+function RuntimePrimitive() {
+  this._quantizationMatrix = Matrix4.clone(Matrix4.IDENTITY);
+  this._command = undefined;
+}
+
+function RuntimeAttribute() {
+  this._;
+}
+
 function createCommands(model, frameState) {
   frameState.context.cache.modelShaderCache = defaultValue(
     frameState.context.cache.modelShaderCache,
@@ -261,8 +406,6 @@ function createCommands(model, frameState) {
   var nodesLength = nodes.length;
   var featureMetadata = components.featureMetadata;
 
-  var commands = [];
-
   var stack = scratchStack;
   stack.length = 0;
 
@@ -277,7 +420,7 @@ function createCommands(model, frameState) {
 
     for (i = 0; i < primitivesLength; ++i) {
       var primitive = primitives[i];
-      var attributes = primitive.attributes;
+      var attributes = primitive.attributes.slice(); // Make a shallow copy
       var attributesLength = attributes.length;
 
       var positionIndex = -1;
@@ -311,6 +454,11 @@ function createCommands(model, frameState) {
       var uniformMap = {};
       var vertexAttributes = [];
 
+      var metadataVertexAttributes = getMetadataVertexAttributes(
+        featureMetadata
+      );
+      attributes.push.apply(attributes, metadataVertexAttributes);
+
       for (j = 0; j < attributesLength; ++j) {
         attribute = attributes[j];
         var semantic = attribute.semantic;
@@ -330,32 +478,32 @@ function createCommands(model, frameState) {
           }
           attributeName = attributeName.toLowerCase();
 
-          // if (quantization.octEncoded) {
-          //   uniformMap[
-          //     "u_octEncodedRange_" + attributeName
-          //   ] = getUniformFunction(quantization.normalizationRange);
-          // } else {
-          //   var quantizedVolumeOffset = quantization.quantizedVolumeOffset;
-          //   var quantizedVolumeDimensions =
-          //     quantization.quantizedVolumeDimensions;
-          //   var normalizationRange = quantization.normalizationRange;
-          //   var quantizedVolumeScale;
+          if (quantization.octEncoded) {
+            uniformMap[
+              "u_octEncodedRange_" + attributeName
+            ] = getUniformFunction(quantization.normalizationRange);
+          } else {
+            var quantizedVolumeOffset = quantization.quantizedVolumeOffset;
+            var quantizedVolumeDimensions =
+              quantization.quantizedVolumeDimensions;
+            var normalizationRange = quantization.normalizationRange;
+            var quantizedVolumeScale;
 
-          //   var MathType = AttributeType.getMathType(type);
-          //   if (MathType === Number) {
-          //     quantizedVolumeScale =
-          //       quantizedVolumeDimensions / normalizationRange;
-          //   } else {
-          //     quantizedVolumeScale = MathType.clone(quantizedVolumeDimensions);
-          //     MathType.divideByScalar(quantizedVolumeScale, normalizationRange);
-          //   }
+            var MathType = AttributeType.getMathType(type);
+            if (MathType === Number) {
+              quantizedVolumeScale =
+                quantizedVolumeDimensions / normalizationRange;
+            } else {
+              quantizedVolumeScale = MathType.clone(quantizedVolumeDimensions);
+              MathType.divideByScalar(quantizedVolumeScale, normalizationRange);
+            }
 
-          //   uniformMap["u_quantizedVolumeOffset"];
+            uniformMap["u_quantizedVolumeOffset"];
 
-          //   uniformMap[
-          //     "u_quantizedVolumeScale_" + attributeName
-          //   ] = getUniformFunction(quantizedVolumeScale);
-          // }
+            uniformMap[
+              "u_quantizedVolumeScale_" + attributeName
+            ] = getUniformFunction(quantizedVolumeScale);
+          }
 
           // var uniformVarName = "model_quantizedVolumeScaleAndOctEncodedRange_" + attribute.toLowerCase();
           // var
