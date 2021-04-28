@@ -44,6 +44,17 @@ var MetallicRoughness = ModelComponents.MetallicRoughness;
 var SpecularGlossiness = ModelComponents.SpecularGlossiness;
 var Material = ModelComponents.Material;
 
+var GltfLoaderState = {
+  UNLOADED: 0,
+  LOADING: 1,
+  READY_TO_PROCESS: 2,
+  PROCESSING: 3,
+  READY_TO_FINALIZE: 4
+  PROCESSING_TEXTURES: 4
+  READY: 4,
+  FAILED: 5,
+};
+
 /**
  * Loads a glTF model.
  * <p>
@@ -90,7 +101,6 @@ export default function GltfLoader(options) {
   this._incrementallyLoadTextures = incrementallyLoadTextures;
   this._gltfJsonLoader = undefined;
   this._state = ResourceLoaderState.UNLOADED;
-  this._parsed = false;
   this._finalize = false;
   this._promise = when.defer();
   this._texturesLoadedPromise = when.defer();
@@ -223,20 +233,13 @@ GltfLoader.prototype.process = function (frameState) {
   Check.typeOf.object("frameState", frameState);
   //>>includeEnd('debug');
 
-  if (
-    this._state !== ResourceLoaderState.PROCESSING &&
-    this._state !== ResourceLoaderState.READY // In case textures still need to be processed when incrementallyLoadTextures is true
-  ) {
-    return;
-  }
-
   if (!FeatureDetection.supportsWebP.initialized) {
     FeatureDetection.supportsWebP.initialize();
     return;
   }
 
-  if (!this._parsed) {
-    this._parsed = true; // Make sure parse is only called once
+  if (this._state === GltfLoaderState.READY_TO_PROCESS) {
+    this._state = GltfLoaderState.PROCESSING;
 
     var supportedImageFormats = new SupportedImageFormats({
       webp: FeatureDetection.supportsWebP(),
@@ -264,39 +267,40 @@ GltfLoader.prototype.process = function (frameState) {
     }
   }
 
-  if (this._readyToFinalize) {
-    this._readyToFinalize = false; // Make sure finalize is only called once
+  if (this._state === GltfLoaderState.PROCESSING) {
+    var i;
+    var textureLoaders = this._textureLoaders;
+    var textureLoadersLength = textureLoaders.length;
+    for (i = 0; i < textureLoadersLength; ++i) {
+      textureLoaders[i].process(frameState);
+    }
+
+    var bufferViewLoaders = this._bufferViewLoaders;
+    var bufferViewLoadersLength = bufferViewLoaders.length;
+    for (i = 0; i < bufferViewLoadersLength; ++i) {
+      bufferViewLoaders[i].process(frameState);
+    }
+
+    var geometryLoaders = this._geometryLoaders;
+    var geometryLoadersLength = geometryLoaders.length;
+    for (i = 0; i < geometryLoadersLength; ++i) {
+      geometryLoaders[i].process(frameState);
+    }
+
+    if (defined(this._featureMetadataLoader)) {
+      this._featureMetadataLoader.process(frameState);
+    }
+  }
+
+  if (this._state === GltfLoaderState.READY_TO_FINALIZE) {
+    loader._state = ResourceLoaderState.READY;
 
     finalize(loader, frameState);
 
     // Buffer views can be unloaded after the data has been copied
     unloadBufferViews(loader);
 
-    loader._state = ResourceLoaderState.READY;
     loader._promise.resolve(loader);
-  }
-
-  var i;
-  var textureLoaders = this._textureLoaders;
-  var textureLoadersLength = textureLoaders.length;
-  for (i = 0; i < textureLoadersLength; ++i) {
-    textureLoaders[i].process(frameState);
-  }
-
-  var bufferViewLoaders = this._bufferViewLoaders;
-  var bufferViewLoadersLength = bufferViewLoaders.length;
-  for (i = 0; i < bufferViewLoadersLength; ++i) {
-    bufferViewLoaders[i].process(frameState);
-  }
-
-  var geometryLoaders = this._geometryLoaders;
-  var geometryLoadersLength = geometryLoaders.length;
-  for (i = 0; i < geometryLoadersLength; ++i) {
-    geometryLoaders[i].process(frameState);
-  }
-
-  if (defined(this._featureMetadataLoader)) {
-    this._featureMetadataLoader.process(frameState);
   }
 };
 
