@@ -651,14 +651,6 @@ function Texture() {
   this.transform = Matrix3.IDENTITY;
 
   /**
-   * Rotate the UVs by this many radians counter-clockwise around the origin.
-   *
-   * @type {Number}
-   * @default 0.0
-   */
-  this.rotation = 0.0;
-
-  /**
    * The sampler.
    *
    * @type {Sampler}
