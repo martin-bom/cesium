@@ -585,10 +585,6 @@ function loadTexture(loader, gltf, textureInfo, supportedImageFormats) {
 
   var texture = new Texture();
   texture.texCoord = defaultValue(textureInfo.texCoord, 0);
-  texture.sampler = GltfLoaderUtil.createSampler({
-    gltf: gltf,
-    textureInfo: textureInfo,
-  });
 
   var extensions = defaultValue(
     textureInfo.extensions,

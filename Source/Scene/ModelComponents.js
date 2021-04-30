@@ -626,7 +626,7 @@ function Components() {
  */
 function Texture() {
   /**
-   * The underlying GPU texture.
+   * The underlying GPU texture. The {@link Texture} contains the sampler.
    *
    * @type {Texture}
    * @private
@@ -649,14 +649,6 @@ function Texture() {
    * @default Matrix3.IDENTITY
    */
   this.transform = Matrix3.IDENTITY;
-
-  /**
-   * The sampler.
-   *
-   * @type {Sampler}
-   * @private
-   */
-  this.sampler = undefined;
 }
 
 /**
