@@ -559,8 +559,6 @@ function loadIndices(loader, gltf, accessorId, draco) {
   return indices;
 }
 
-var defaultScale = new Cartesian2(1.0, 1.0);
-
 function loadTexture(loader, gltf, textureInfo, supportedImageFormats) {
   var imageId = GltfLoaderUtil.getImageIdFromTexture({
     gltf: gltf,
@@ -583,35 +581,9 @@ function loadTexture(loader, gltf, textureInfo, supportedImageFormats) {
 
   loader._textureLoaders.push(textureLoader);
 
-  var texture = new Texture();
-  texture.texCoord = defaultValue(textureInfo.texCoord, 0);
-
-  var extensions = defaultValue(
-    textureInfo.extensions,
-    defaultValue.EMPTY_OBJECT
-  );
-  var textureTransform = extensions.KHR_texture_transform;
-  if (defined(textureTransform)) {
-    texture.texCoord = defaultValue(
-      textureTransform.texCoord,
-      texture.texCoord
-    );
-
-    var offset = defined(textureTransform.offset)
-      ? Cartesian2.unpack(textureTransform.offset)
-      : Cartesian2.ZERO;
-    var rotation = defaultValue(textureTransform.rotation, 0.0);
-    var scale = defined(textureTransform.scale)
-      ? Cartesian2.unpack(textureTransform.scale)
-      : defaultScale;
-
-    // prettier-ignore
-    texture.transform = new Matrix3(
-      Math.cos(rotation) * scale.x, -Math.sin(rotation) * scale.y, offset.x,
-      Math.sin(rotation) * scale.x, Math.cos(rotation) * scale.y, offset.y,
-      0.0, 0.0, 1.0
-    );
-  }
+  var texture = GltfLoaderUtil.createModelTexture({
+    textureInfo: textureInfo
+  })
 
   textureLoader.promise.then(function (textureLoader) {
     if (loader.isDestroyed()) {
@@ -751,7 +723,6 @@ function loadFeatureIdTexture(
   var textureInfo = featureIds.texture;
 
   featureIdTexture.featureTableId = gltfFeatureIdTexture.featureTable;
-  featureIdTexture.channel = featureIds.channels;
   featureIdTexture.texture = loadTexture(
     loader,
     gltf,
@@ -761,6 +732,7 @@ function loadFeatureIdTexture(
 
   // Feature ID textures require nearest sampling
   featureIdTexture.texture.sampler = Sampler.NEAREST;
+  featureIdTexture.texture.channels = featureIds.channels;
 
   return featureIdTexture;
 }

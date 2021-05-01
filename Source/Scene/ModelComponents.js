@@ -321,14 +321,6 @@ function FeatureIdTexture() {
   this.featureTableId = undefined;
 
   /**
-   * The texture channel containing feature IDs, may be "r", "g", "b", or "a".
-   *
-   * @type {String}
-   * @private
-   */
-  this.channel = undefined;
-
-  /**
    * The texture containing feature IDs.
    *
    * @type {ModelComponents.Texture}
@@ -648,7 +640,14 @@ function Texture() {
    * @type {Matrix3}
    * @default Matrix3.IDENTITY
    */
-  this.transform = Matrix3.IDENTITY;
+  this.transform = Matrix3.clone(Matrix3.IDENTITY);
+
+  /**
+   * The texture channels to read from. When undefined all channels are read.
+   *
+   * @type {String}
+   */
+  this.channels = undefined;
 }
 
 /**
@@ -813,7 +812,7 @@ function Material() {
    * @default Cartesian3.ZERO
    * @private
    */
-  this.emissiveFactor = new Cartesian3(0.0, 0.0, 0.0);
+  this.emissiveFactor = Cartesian3.clone(Cartesian3.ZERO);
 
   /**
    * The alpha mode.
