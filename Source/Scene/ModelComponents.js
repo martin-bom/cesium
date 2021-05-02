@@ -30,6 +30,13 @@ function Quantization() {
   this.octEncoded = false;
 
   /**
+   * Whether the oct-encoded values are stored as ZXY instead of XYZ. This is true when decoding from Draco.
+   *
+   * @type {Boolean}
+   */
+  this.octEncodedZXY = false;
+
+  /**
    * The range used to convert buffer values to normalized values [0.0, 1.0]
    * This is typically computed as (1 << quantizationBits) - 1
    *

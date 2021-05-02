@@ -704,43 +704,29 @@ function getMaterialUniforms(primitive, material, context) {
   };
 }
 
-function getPositionUniforms(node, positionAttribute, context) {
-  var uniformProperties = {
-    computedMatrix: node._computedMatrix,
-    scratchModelViewMatrix: new Matrix4(),
-  };
+function getPositionUniforms(positionAttribute) {
+  var uniformMap = {};
+  var uniformProperties = {};
 
-  if (defined(positionAttribute.quantization)) {
-    uniformProperties.positionQuantizationMatrix = getPositionQuantizationMatrix(
-      positionAttribute
+  var positionQuantization = positionAttribute.quantization;
+  if (defined(positionQuantization)) {
+    var dequantizationOffset = positionQuantization.quantizedVolumeOffset;
+    var dequantizationScale = Cartesian3.divideByScalar(
+      positionQuantization.quantizedVolumeDimensions,
+      positionQuantization.normalizationRange,
+      new Cartesian3()
     );
+
+    uniformProperties.positionDequantizationOffset = dequantizationOffset;
+    uniformProperties.positionDequantizationScale = dequantizationScale;
+
+    uniformMap.u_positionDequantizationOffset = function () {
+      return this.properties.positionDequantizationOffset;
+    };
+    uniformMap.u_positionDequantizationScale = function () {
+      return this.properties.positionDequantizationScale;
+    };
   }
-
-  var uniformMap = {
-    u_modelViewMatrix: function () {
-      var modelMatrix = this.properties.computedMatrix;
-      var modelViewMatrix = this.properties.scratchModelViewMatrix;
-      var positionQuantizationMatrix = this.properties
-        .positionQuantizationMatrix;
-
-      if (defined(positionQuantizationMatrix)) {
-        // Bake dequantization into the model matrix
-        modelMatrix = Matrix4.multiplyTransformation(
-          modelMatrix,
-          positionQuantizationMatrix,
-          modelViewMatrix
-        );
-      }
-
-      modelViewMatrix = Matrix4.multiplyTransformation(
-        modelMatrix,
-        context.uniformState.view,
-        modelViewMatrix
-      );
-
-      return modelViewMatrix;
-    },
-  };
 
   return {
     uniformMap: uniformMap,
@@ -754,27 +740,32 @@ function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
     scratchNormalMatrix: new Matrix3(),
   };
 
-  if (defined(normalAttribute.quantization)) {
-    var normalQuantization = normalAttribute.quantization;
-
-    var normalOctEncoded = normalQuantization.octEncoded;
-
-    if (normalOctEncoded) {
+  var normalQuantization = normalAttribute.quantization;
+  if (defined(normalQuantization)) {
+    if (normalQuantization.octEncoded) {
       uniformProperties.normalOctEncodedRange =
-        normalQuantization.normalizationRange;
+        normalQuantization.normalizationRange.x;
       uniformMap.u_normalOctEncodedRange = function () {
         return this.properties.normalOctEncodedRange;
       };
     } else {
-      uniformProperties.normalInverseQuantizationRange = Cartesian3.divideComponents(
+      var dequantizationScale = Cartesian3.divideComponents(
         cartesian3One,
         normalQuantization.normalizationRange,
         new Cartesian3()
       );
+      uniformProperties.normalDequantizationScale = dequantizationScale;
+      uniformMap.u_normalDequantizationScale = function () {
+        return this.properties.normalDequantizationScale;
+      };
     }
   }
 
-  if (positionAttribute.componentDatatype !== ComponentDatatype.FLOAT) {
+  if (
+    positionAttribute.componentDatatype !== ComponentDatatype.FLOAT &&
+    !defined(node.instances) &&
+    !defined(node.skin)
+  ) {
     // Important caveat when dealing with the KHR_mesh_quantization extension.
     // The extension says:
     //
@@ -782,10 +773,10 @@ function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
     //   existing ways to specify geometry transformation instead of adding
     //   special dequantization transforms to the schema.
     //
-    // This means the quantization offset/scale used to convert quantized
-    // positions to object-space positions is baked into the node matrix. When the x, y,
-    // and z axes have different quantization scales this manifests as a node
-    // matrix with non-uniform scale. This has undesired consequences when
+    // This means the dequantization offset/scale used to convert quantized
+    // positions to object-space positions is baked into the node matrix. When
+    // the x, y, and z axes have different quantization scales the node matrix
+    // will have a non-uniform scale. This has undesired consequences when
     // transforming normals and tangents and the spec cautions against it:
     //
     //   To preserve the direction of normal/tangent vectors, it is
@@ -793,7 +784,7 @@ function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
     //   is uniform across X/Y/Z axes.
     //
     // However not all exporters will follow these guidelines nor should they
-    // if a single axis can be compressed with less bits than the others, for example
+    // if a single axis can be compressed with less bits than the others like
     // when using the EXT_meshopt_compression extension.
     //
     // To fix this the quantization scale needs to be factored out of the model
@@ -803,24 +794,23 @@ function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
     // to do this by factoring out the quantization scale from the node's local
     // matrix rather than the computed model matrix.
     //
-    // There are some scenarios where this workaround is not sufficient:
+    // This workaround doesn't work in the following cases:
     //   1. The local matrix has a baked-in non-uniform scale and a baked-in
     //      non-uniform quantization scale. It's not possible to extract just
     //      the quantization scale in this case.
-    //   2. The node is instanced and the quantization scale is non-uniform. The
-    //      quantization scale would be baked into the per-instance TRS which
-    //      this workaround does not have access to. In general instanced models
+    //   2. The non-uniform quantization scale is baked into the instance
+    //      translation, rotation, scale attributes. In general instanced models
     //      should be compressed with uniform quantization scale.
-    //   3. The node is skinned in which case the quantization scale would be
-    //      baked into the inverse bind matrices which this workaround does not
-    //      have access to. In general skinned models should be compressed with
-    //      uniform quantization scale.
+    //   3. The non-uniform quantization scale is baked into the inverse bind
+    //      matrices of the skin. In general skinned models should be compressed
+    //      with uniform quantization scale.
     uniformProperties.localMatrix = node._localMatrix;
   }
 
   uniformMap.u_normalMatrix = function () {
     var modelMatrix = this.properties.computedMatrix;
     var localMatrix = this.properties.localMatrix;
+    var normalMatrix = this.properties.scratchNormalMatrix;
 
     if (defined(localMatrix)) {
       var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
@@ -847,21 +837,8 @@ function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
       scratchModelMatrix
     );
 
-    var normalMatrix = this.properties.scratchNormalMatrix;
     normalMatrix = Matrix4.getMatrix3(inverseModelViewMatrix, normalMatrix);
     normalMatrix = Matrix3.transpose(normalMatrix, normalMatrix);
-
-    var inverseQuantizationRange = this.properties
-      .normalInverseQuantizationRange;
-
-    if (defined(inverseQuantizationRange)) {
-      // Bake dequantization into the normal matrix
-      Matrix3.multiplyByScale(
-        normalMatrix,
-        inverseQuantizationRange,
-        normalMatrix
-      );
-    }
 
     return normalMatrix;
   };
@@ -883,27 +860,32 @@ function getTangentUniforms(
     scratchTangentMatrix: new Matrix3(),
   };
 
-  if (defined(tangentAttribute.quantization)) {
-    var tangentQuantization = tangentAttribute.quantization;
-
-    var tangentOctEncoded = tangentQuantization.octEncoded;
-
-    if (tangentOctEncoded) {
+  var tangentQuantization = tangentAttribute.quantization;
+  if (defined(tangentQuantization)) {
+    if (tangentQuantization.octEncoded) {
       uniformProperties.tangentOctEncodedRange =
-        tangentQuantization.normalizationRange;
+        tangentQuantization.normalizationRange.x;
       uniformMap.u_tangentOctEncodedRange = function () {
         return this.properties.tangentOctEncodedRange;
       };
     } else {
-      uniformProperties.tangentInverseQuantizationRange = Cartesian3.divideComponents(
+      var dequantizationScale = Cartesian3.divideComponents(
         cartesian3One,
         tangentQuantization.normalizationRange,
         new Cartesian3()
       );
+      uniformProperties.tangentDequantizationScale = dequantizationScale;
+      uniformMap.u_tangentDequantizationScale = function () {
+        return this.properties.tangentDequantizationScale;
+      };
     }
   }
 
-  if (positionAttribute.componentDatatype !== ComponentDatatype.FLOAT) {
+  if (
+    positionAttribute.componentDatatype !== ComponentDatatype.FLOAT &&
+    !defined(node.instances) &&
+    !defined(node.skin)
+  ) {
     // See caveat about KHR_mesh_quantization above
     uniformProperties.localMatrix = node._localMatrix;
   }
@@ -911,6 +893,7 @@ function getTangentUniforms(
   uniformMap.u_tangentMatrix = function () {
     var modelMatrix = this.properties.computedMatrix;
     var localMatrix = this.properties.localMatrix;
+    var tangentMatrix = this.properties.scratchTangentMatrix;
 
     if (defined(localMatrix)) {
       var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
@@ -932,21 +915,7 @@ function getTangentUniforms(
       scratchModelMatrix
     );
 
-    var tangentMatrix = this.properties.scratchTangentMatrix;
-    Matrix4.getMatrix3(modelViewMatrix, tangentMatrix);
-
-    var inverseQuantizationRange = this.properties
-      .tangentInverseQuantizationRange;
-
-    if (defined(inverseQuantizationRange)) {
-      // Bake dequantization into the tangent matrix
-      Matrix3.multiplyByScale(
-        tangentMatrix,
-        inverseQuantizationRange,
-        tangentMatrix
-      );
-    }
-
+    tangentMatrix = Matrix4.getMatrix3(modelViewMatrix, tangentMatrix);
     return tangentMatrix;
   };
 

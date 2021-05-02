@@ -200,6 +200,7 @@ function getQuantizationInformation(
   var quantization = new ModelComponents.Quantization();
   quantization.componentDatatype = componentDatatype;
   quantization.octEncoded = dracoQuantization.octEncoded;
+  quantization.octEncodedZXY = true;
   quantization.normalizationRange = MathType.unpack(
     arrayFill(new Array(componentCount), normalizationRange)
   );
