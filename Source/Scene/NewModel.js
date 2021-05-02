@@ -1,6 +1,9 @@
 import BoundingSphere from "../Core/BoundingSphere.js";
+import Cartesian2 from "../Core/Cartesian2.js";
 import Cartesian3 from "../Core/Cartesian3.js";
+import Cartesian4 from "../Core/Cartesian4.js";
 import Check from "../Core/Check.js";
+import combine from "../Core/combine.js";
 import ComponentDatatype from "../Core/ComponentDatatype.js";
 import defaultValue from "../Core/defaultValue.js";
 import defined from "../Core/defined.js";
@@ -14,8 +17,9 @@ import Buffer from "../Renderer/Buffer.js";
 import BufferUsage from "../Renderer/BufferUsage.js";
 import numberOfComponentsForType from "../ThirdParty/GltfPipeline/numberOfComponentsForType.js";
 import when from "../ThirdParty/when.js";
-import GltfLoader from "./GltfLoader.js";
+import AlphaMode from "./AlphaMode.js";
 import AttributeType from "./AttributeType.js";
+import GltfLoader from "./GltfLoader.js";
 import MetadataType from "./MetadataType.js";
 import ModelComponents from "./ModelComponents.js";
 import SceneMode from "./SceneMode.js";
@@ -375,6 +379,8 @@ function getMetadataVertexAttributes(
   return metadataVertexAttributes;
 }
 
+// TODO: feature id attribute for implicit feature ids with non-1 divisor and non-constant
+
 function RuntimeNode() {
   this._computedMatrix = Matrix4.clone(Matrix4.IDENTITY);
   this._localMatrix = Matrix4.clone(Matrix4.IDENTITY);
@@ -404,7 +410,8 @@ function getAttributeBySemantic(primitive, semantic) {
 var scratchPositionQuantizationScale = new Cartesian3();
 var scratchLocalScale = new Cartesian3();
 var scratchModelMatrix = new Matrix4();
-var cartesianOne = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
+var cartesian3One = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
+var cartesian4One = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
 
 function getPositionQuantizationMatrix(positionAttribute) {
   var quantization = positionAttribute.quantization;
@@ -421,74 +428,300 @@ function getPositionQuantizationMatrix(positionAttribute) {
   );
 }
 
-function createUniformMap(model, node, primitive, frameState) {
-  // TODO: model matrix dirty
+// TODO: what uniforms are needed for style or for custom shader? E.g. normal might be used for slope rendering but material might be unlit.
+// TODO: assign defaults in ModelComponents
+// TODO: how to prevent using too many attributes
 
-  var positionAttribute = getAttributeBySemantic(primitive, "POSITION");
+function usesTextureTransform(texture) {
+  return !Matrix3.equals(texture.transform, Matrix3.IDENTITY);
+}
+
+function usesUnlitShader(primitive) {
   var normalAttribute = getAttributeBySemantic(primitive, "NORMAL");
-  var tangentAttribute = getAttributeBySemantic(primitive, "TANGENT");
-  var texcoord0Attribute = getAttributeBySemantic(primitive, "TEXCOORD_0");
-  var texcoord1Attribute = getAttributeBySemantic(primitive, "TEXCOORD_1");
+  return !defined(normalAttribute) || primitive.material.unlit;
+}
 
-  var properties = {
-    computedMatrix: node._computedMatrix,
-    localMatrix: node._localMatrix,
-    positionComponentDatatype: undefined,
-    positionQuantizationMatrix: undefined,
-    normalOctEncoded: false,
-    normalInverseQuantizationRange: undefined,
-    tangentOctEncoded: false,
-    tangentInverseQuantizationRange: undefined,
-    scratchModelViewMatrix: new Matrix4(),
-    scratchNormalMatrix: new Matrix3(),
-    scratchTangentMatrix: new Matrix3(),
+function usesNormalAttribute(primitive) {
+  var normalAttribute = getAttributeBySemantic(primitive, "NORMAL");
+  var usesNormalTexture = defined(primitive.material.normalTexture);
+  return (
+    defined(normalAttribute) && !usesUnlitShader(primitive) && usesNormalTexture
+  );
+}
+
+function usesTangentAttribute(primitive) {
+  var tangentAttribute = getAttributeBySemantic(primitive, "TANGENT");
+  return defined(tangentAttribute) && usesNormalAttribute(primitive);
+}
+
+function getMaterialUniforms(primitive, material, context) {
+  var uniformMap = {};
+  var uniformProperties = {
+    material: material,
   };
 
-  properties.computedMatrix = node._computedMatrix;
-  properties.localMatrix = node._localMatrix;
-  properties.positionComponentDatatype = positionAttribute.componentDatatype;
+  var specularGlossiness = material.specularGlossiness;
+  var metallicRoughness = material.metallicRoughness;
+
+  var usesSpecularGlossiness = defined(specularGlossiness);
+  var usesMetallicRoughness =
+    defined(metallicRoughness) && !usesSpecularGlossiness;
+
+  var unlit = usesUnlitShader(primitive);
+  var usesTangents = usesTangentAttribute(primitive);
+
+  var usesDiffuseTexture =
+    usesSpecularGlossiness && defined(specularGlossiness.diffuseTexture);
+
+  var usesDiffuseTextureTransform =
+    usesDiffuseTexture &&
+    usesTextureTransform(specularGlossiness.diffuseTexture);
+
+  var usesSpecularGlossinessTexture =
+    !unlit &&
+    usesSpecularGlossiness &&
+    defined(specularGlossiness.specularGlossinessTexture);
+
+  var usesSpecularGlossinessTextureTransform =
+    usesSpecularGlossinessTexture &&
+    usesTextureTransform(specularGlossiness.specularGlossinessTexture);
+
+  var usesDiffuseFactor =
+    usesSpecularGlossiness &&
+    !Cartesian4.equals(specularGlossiness.diffuseFactor, cartesian4One);
+
+  var usesSpecularFactor =
+    !unlit &&
+    usesSpecularGlossiness &&
+    !Cartesian3.equals(specularGlossiness.specularFactor, cartesian3One);
+
+  var usesBaseColorTexture =
+    usesMetallicRoughness && defined(metallicRoughness.baseColorTexture);
+
+  var usesBaseColorTextureTransform =
+    usesBaseColorTexture &&
+    usesTextureTransform(metallicRoughness.baseColorTexture);
+
+  var usesMetallicRoughnessTexture =
+    !unlit &&
+    usesMetallicRoughness &&
+    defined(metallicRoughness.metallicRoughnessTexture);
+
+  var usesMetallicRoughnessTextureTransform =
+    usesMetallicRoughnessTexture &&
+    usesTextureTransform(metallicRoughness.metallicRoughnessTexture);
+
+  var usesBaseColorFactor =
+    usesMetallicRoughness &&
+    !Cartesian3.equals(metallicRoughness.baseColorFactor, cartesian4One);
+
+  var usesMetallicFactor =
+    !unlit && usesMetallicRoughness && metallicRoughness.metallicFactor !== 1.0;
+
+  var usesRoughnessFactor =
+    !unlit &&
+    usesMetallicRoughness &&
+    metallicRoughness.roughnessFactor !== 1.0;
+
+  var usesEmissiveTexture = defined(material.emissiveTexture);
+
+  var usesEmissiveTextureTransform =
+    usesEmissiveTexture && usesTextureTransform(material.emissiveTexture);
+
+  var usesNormalTexture = defined(material.normalTexture) && usesTangents; // Normal mapping requires tangents
+
+  var usesNormalTextureTransform =
+    usesNormalTexture && usesTextureTransform(material.normalTexture);
+
+  var usesOcclusionTexture = defined(material.occlusionTexture);
+
+  var usesOcclusionTextureTransform =
+    usesOcclusionTexture && usesTextureTransform(material.occlusionTexture);
+
+  var usesEmissiveFactor = !Cartesian3.equals(
+    material.emissiveFactor,
+    Cartesian3.ZERO
+  );
+
+  var usesAlphaCutoff = material.alphaMode === AlphaMode.MASK;
+
+  if (usesDiffuseTexture) {
+    uniformMap.u_diffuseTexture = function () {
+      return defaultValue(
+        this.properties.material.specularGlossiness.diffuseTexture.texture,
+        context.defaultTexture // return the default texture if the texture is still loading
+      );
+    };
+  }
+
+  if (usesDiffuseTextureTransform) {
+    uniformMap.u_diffuseTextureTransform = function () {
+      return this.properties.material.specularGlossiness.diffuseTexture
+        .transform;
+    };
+  }
+
+  if (usesSpecularGlossinessTexture) {
+    uniformMap.u_specularGlossinessTexture = function () {
+      return defaultValue(
+        this.properties.material.specularGlossiness.specularGlossinessTexture
+          .texture,
+        context.defaultTexture // return the default texture if the texture is still loading
+      );
+    };
+  }
+
+  if (usesSpecularGlossinessTextureTransform) {
+    uniformMap.u_specularGlossinessTextureTransform = function () {
+      return this.properties.material.specularGlossiness
+        .specularGlossinessTexture.transform;
+    };
+  }
+
+  if (usesDiffuseFactor) {
+    uniformMap.u_diffuseFactor = function () {
+      return this.properties.material.specularGlossiness.diffuseFactor;
+    };
+  }
+
+  if (usesSpecularFactor) {
+    uniformMap.u_specularFactor = function () {
+      return this.properties.material.specularGlossiness.specularFactor;
+    };
+  }
+
+  if (usesBaseColorTexture) {
+    uniformMap.u_baseColorTexture = function () {
+      return defaultValue(
+        this.properties.material.metallicRoughness.baseColorTexture.texture,
+        context.defaultTexture // return the default texture if the texture is still loading
+      );
+    };
+  }
+
+  if (usesBaseColorTextureTransform) {
+    uniformMap.u_baseColorTextureTransform = function () {
+      return this.properties.material.metallicRoughness.baseColorTexture
+        .transform;
+    };
+  }
+
+  if (usesMetallicRoughnessTexture) {
+    uniformMap.u_metallicRoughnessTexture = function () {
+      return defaultValue(
+        this.properties.material.metallicRoughness.metallicRoughnessTexture
+          .texture,
+        context.defaultTexture // return the default texture if the texture is still loading
+      );
+    };
+  }
+
+  if (usesMetallicRoughnessTextureTransform) {
+    uniformMap.u_metallicRoughnessTextureTransform = function () {
+      return this.properties.material.metallicRoughness.metallicRoughnessTexture
+        .transform;
+    };
+  }
+
+  if (usesBaseColorFactor) {
+    uniformMap.u_baseColorFactor = function () {
+      return this.properties.material.metallicRoughness.baseColorFactor;
+    };
+  }
+
+  if (usesMetallicFactor || usesRoughnessFactor) {
+    uniformProperties.scratchMetallicRoughnessFactor = new Cartesian2();
+
+    uniformMap.u_metallicRoughnessFactor = function () {
+      return Cartesian2.fromElements(
+        this.properties.material.metallicRoughness.metallicFactor,
+        this.properties.material.metallicRoughness.roughnessFactor,
+        this.properties.scratchMetallicRoughnessFactor
+      );
+    };
+  }
+
+  if (usesEmissiveTexture) {
+    uniformMap.u_emissiveTexture = function () {
+      return defaultValue(
+        this.properties.material.emissiveTexture.texture,
+        context.defaultTexture // TODO: this might look bright
+      );
+    };
+  }
+
+  if (usesEmissiveTextureTransform) {
+    uniformMap.u_emissiveTextureTransform = function () {
+      return this.properties.material.emissiveTexture.transform;
+    };
+  }
+
+  if (usesNormalTexture) {
+    uniformMap.u_normalTexture = function () {
+      return defaultValue(
+        this.properties.material.normalTexture.texture,
+        context.defaultTexture // TODO: this is wrong
+      );
+    };
+  }
+
+  if (usesNormalTextureTransform) {
+    uniformMap.u_normalTextureTransform = function () {
+      return this.properties.material.normaTexture.transform;
+    };
+  }
+
+  if (usesOcclusionTexture) {
+    uniformMap.u_occlusionTexture = function () {
+      return defaultValue(
+        this.properties.material.occlusionTexture.texture,
+        context.defaultTexture // return the default texture if the texture is still loading
+      );
+    };
+  }
+
+  if (usesOcclusionTextureTransform) {
+    uniformMap.u_occlusionTextureTransform = function () {
+      return this.properties.material.occlusionTexture.transform;
+    };
+  }
+
+  if (usesEmissiveFactor) {
+    uniformMap.u_emissiveFactor = function () {
+      return this.properties.material.emissiveFactor;
+    };
+  }
+
+  if (usesAlphaCutoff) {
+    uniformMap.u_alphaCutoff = function () {
+      return this.properties.material.alphaCutoff;
+    };
+  }
+
+  return {
+    uniformMap: uniformMap,
+    uniformProperties: uniformProperties,
+  };
+}
+
+function getPositionUniforms(node, positionAttribute, context) {
+  var uniformProperties = {
+    computedMatrix: node._computedMatrix,
+    scratchModelViewMatrix: new Matrix4(),
+  };
 
   if (defined(positionAttribute.quantization)) {
-    properties.positionQuantizationMatrix = getPositionQuantizationMatrix(
+    uniformProperties.positionQuantizationMatrix = getPositionQuantizationMatrix(
       positionAttribute
     );
   }
 
-  if (defined(normalAttribute) && defined(normalAttribute.quantization)) {
-    var normalQuantization = normalAttribute.quantization;
-
-    var normalOctEncoded = normalQuantization.octEncoded;
-    properties.normalOctEncoded = normalOctEncoded;
-
-    if (!normalOctEncoded) {
-      properties.normalInverseQuantizationRange = Cartesian3.divideComponents(
-        cartesianOne,
-        normalQuantization.normalizationRange,
-        new Cartesian3()
-      );
-    }
-  }
-
-  if (defined(tangentAttribute) && defined(tangentAttribute.quantization)) {
-    var tangentQuantization = tangentAttribute.quantization;
-
-    var tangentOctEncoded = tangentQuantization.octEncoded;
-    properties.tangentOctEncoded = tangentOctEncoded;
-
-    if (!tangentOctEncoded) {
-      properties.tangentInverseQuantizationRange = Cartesian3.divideComponents(
-        cartesianOne,
-        tangentQuantization.normalizationRange,
-        new Cartesian3()
-      );
-    }
-  }
-
   var uniformMap = {
     u_modelViewMatrix: function () {
-      var modelMatrix = properties.computedMatrix;
-      var modelViewMatrix = properties.scratchModelViewMatrix;
-      var positionQuantizationMatrix = properties.positionQuantizationMatrix;
+      var modelMatrix = this.properties.computedMatrix;
+      var modelViewMatrix = this.properties.scratchModelViewMatrix;
+      var positionQuantizationMatrix = this.properties
+        .positionQuantizationMatrix;
 
       if (defined(positionQuantizationMatrix)) {
         // Bake dequantization into the model matrix
@@ -501,179 +734,297 @@ function createUniformMap(model, node, primitive, frameState) {
 
       modelViewMatrix = Matrix4.multiplyTransformation(
         modelMatrix,
-        frameState.context.uniformState.view,
+        context.uniformState.view,
         modelViewMatrix
       );
 
       return modelViewMatrix;
     },
-    u_normalMatrix: function () {
-      var modelMatrix = properties.computedMatrix;
-      var localMatrix = properties.localMatrix;
-
-      if (properties.positionComponentDatatype !== ComponentDatatype.FLOAT) {
-        // Important caveat when dealing with the KHR_mesh_quantization extension.
-        // The extension says:
-        //
-        //   To simplify implementation requirements, the extension relies on
-        //   existing ways to specify geometry transformation instead of adding
-        //   special dequantization transforms to the schema.
-        //
-        // This means the quantization offset/scale used to convert quantized
-        // positions to world positions is baked into the node matrix. When the x, y,
-        // and z axes have different quantization scales this manifests as a node
-        // matrix with non-uniform scale. This has undesired consequences when
-        // transforming normals and tangents. The spec cautions against this:
-        //
-        //   To preserve the direction of normal/tangent vectors, it is
-        //   recommended that the quantization scale specified in the transform
-        //   is uniform across X/Y/Z axes.
-        //
-        // However not all exporters will follow these guidelines nor should they
-        // if a single axis can be compressed with less bits than the others.
-        //
-        // To fix this the quantization scale needs to be factored out of the model
-        // matrix when creating the normal matrix. However it's difficult to distinguish
-        // non-uniform quantization scale from non-uniform scale produced by the scene
-        // graph (e.g. stretching a model with an animation). The code below attempts
-        // to do this by factoring out the quantization scale from the node's local
-        // matrix rather than the computed model matrix.
-        var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
-        var inverseLocalScale = Cartesian3.divideComponents(
-          cartesianOne,
-          localScale,
-          localScale
-        );
-        modelMatrix = Matrix4.multiplyByScale(
-          modelMatrix,
-          inverseLocalScale,
-          scratchModelMatrix
-        );
-      }
-
-      var modelViewMatrix = Matrix4.multiplyTransformation(
-        modelMatrix,
-        frameState.context.uniformState.view,
-        scratchModelMatrix
-      );
-
-      var inverseModelViewMatrix = Matrix4.inverseTransformation(
-        modelViewMatrix,
-        scratchModelMatrix
-      );
-
-      var normalMatrix = properties.scratchNormalMatrix;
-      normalMatrix = Matrix4.getMatrix3(inverseModelViewMatrix, normalMatrix);
-      normalMatrix = Matrix3.transpose(normalMatrix, normalMatrix);
-
-      var inverseQuantizationRange = properties.normalInverseQuantizationRange;
-
-      if (defined(inverseQuantizationRange)) {
-        // Bake dequantization into the normal matrix
-        Matrix3.multiplyByScale(
-          normalMatrix,
-          inverseQuantizationRange,
-          normalMatrix
-        );
-      }
-
-      return normalMatrix;
-    },
-    u_tangentMatrix: function () {
-      var modelMatrix = properties.computedMatrix;
-      var localMatrix = properties.localMatrix;
-
-      if (properties.positionComponentDatatype !== ComponentDatatype.FLOAT) {
-        // Same caveat for KHR_mesh_quantization as above
-        var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
-        var inverseLocalScale = Cartesian3.divideComponents(
-          cartesianOne,
-          localScale,
-          localScale
-        );
-        modelMatrix = Matrix4.multiplyByScale(
-          modelMatrix,
-          inverseLocalScale,
-          scratchModelMatrix
-        );
-      }
-
-      var modelViewMatrix = Matrix4.multiplyTransformation(
-        modelMatrix,
-        frameState.context.uniformState.view,
-        scratchModelMatrix
-      );
-
-      var tangentMatrix = properties.scratchTangentMatrix;
-      Matrix4.getMatrix3(modelViewMatrix, tangentMatrix);
-
-      var inverseQuantizationRange = properties.tangentInverseQuantizationRange;
-
-      if (defined(inverseQuantizationRange)) {
-        // Bake dequantization into the tangent matrix
-        Matrix3.multiplyByScale(
-          tangentMatrix,
-          inverseQuantizationRange,
-          tangentMatrix
-        );
-      }
-
-      return tangentMatrix;
-    },
-    properties: properties,
   };
 
-  // Need to get the texture transform object
+  return {
+    uniformMap: uniformMap,
+    uniformProperties: uniformProperties,
+  };
+}
 
-  // for (j = 0; j < attributesLength; ++j) {
-  //   attribute = attributes[j];
-  //   var semantic = attribute.semantic;
-  //   var type = attribute.type;
-  //   var componentDatatype = attribute.componentDatatype;
-  //   var normalized = attribute.normalized;
+function getNormalUniforms(node, positionAttribute, normalAttribute, context) {
+  var uniformMap = {};
+  var uniformProperties = {
+    scratchNormalMatrix: new Matrix3(),
+  };
 
-  //   var quantization = attribute.quantization;
-  //   if (defined(quantization)) {
-  //     type = quantization.type;
-  //     componentDatatype = quantization.componentDatatype;
-  //     normalized = false; // Normalization happens manually in the shader
+  if (defined(normalAttribute.quantization)) {
+    var normalQuantization = normalAttribute.quantization;
 
-  //     var attributeName = semantic;
-  //     if (attributeName.charAt(0) === "_") {
-  //       attributeName = attributeName.slice(1);
-  //     }
-  //     attributeName = attributeName.toLowerCase();
+    var normalOctEncoded = normalQuantization.octEncoded;
 
-  //     if (quantization.octEncoded) {
-  //       uniformMap[
-  //         "u_octEncodedRange_" + attributeName
-  //       ] = getUniformFunction(quantization.normalizationRange);
-  //     } else {
-  //       var quantizedVolumeOffset = quantization.quantizedVolumeOffset;
-  //       var quantizedVolumeDimensions =
-  //         quantization.quantizedVolumeDimensions;
-  //       var normalizationRange = quantization.normalizationRange;
-  //       var quantizedVolumeScale;
+    if (normalOctEncoded) {
+      uniformProperties.normalOctEncodedRange =
+        normalQuantization.normalizationRange;
+      uniformMap.u_normalOctEncodedRange = function () {
+        return this.properties.normalOctEncodedRange;
+      };
+    } else {
+      uniformProperties.normalInverseQuantizationRange = Cartesian3.divideComponents(
+        cartesian3One,
+        normalQuantization.normalizationRange,
+        new Cartesian3()
+      );
+    }
+  }
 
-  //       var MathType = AttributeType.getMathType(type);
-  //       if (MathType === Number) {
-  //         quantizedVolumeScale =
-  //           quantizedVolumeDimensions / normalizationRange;
-  //       } else {
-  //         quantizedVolumeScale = MathType.clone(quantizedVolumeDimensions);
-  //         MathType.divideByScalar(quantizedVolumeScale, normalizationRange);
-  //       }
+  if (positionAttribute.componentDatatype !== ComponentDatatype.FLOAT) {
+    // Important caveat when dealing with the KHR_mesh_quantization extension.
+    // The extension says:
+    //
+    //   To simplify implementation requirements, the extension relies on
+    //   existing ways to specify geometry transformation instead of adding
+    //   special dequantization transforms to the schema.
+    //
+    // This means the quantization offset/scale used to convert quantized
+    // positions to object-space positions is baked into the node matrix. When the x, y,
+    // and z axes have different quantization scales this manifests as a node
+    // matrix with non-uniform scale. This has undesired consequences when
+    // transforming normals and tangents and the spec cautions against it:
+    //
+    //   To preserve the direction of normal/tangent vectors, it is
+    //   recommended that the quantization scale specified in the transform
+    //   is uniform across X/Y/Z axes.
+    //
+    // However not all exporters will follow these guidelines nor should they
+    // if a single axis can be compressed with less bits than the others, for example
+    // when using the EXT_meshopt_compression extension.
+    //
+    // To fix this the quantization scale needs to be factored out of the model
+    // matrix when creating the normal matrix. However it's difficult to distinguish
+    // non-uniform quantization scale from non-uniform scale produced by the scene
+    // graph (e.g. stretching a parent node with an animation). The code below attempts
+    // to do this by factoring out the quantization scale from the node's local
+    // matrix rather than the computed model matrix.
+    //
+    // There are some scenarios where this workaround is not sufficient:
+    //   1. The local matrix has a baked-in non-uniform scale and a baked-in
+    //      non-uniform quantization scale. It's not possible to extract just
+    //      the quantization scale in this case.
+    //   2. The node is instanced and the quantization scale is non-uniform. The
+    //      quantization scale would be baked into the per-instance TRS which
+    //      this workaround does not have access to. In general instanced models
+    //      should be compressed with uniform quantization scale.
+    //   3. The node is skinned in which case the quantization scale would be
+    //      baked into the inverse bind matrices which this workaround does not
+    //      have access to. In general skinned models should be compressed with
+    //      uniform quantization scale.
+    uniformProperties.localMatrix = node._localMatrix;
+  }
 
-  //       uniformMap["u_quantizedVolumeOffset"];
+  uniformMap.u_normalMatrix = function () {
+    var modelMatrix = this.properties.computedMatrix;
+    var localMatrix = this.properties.localMatrix;
 
-  //       uniformMap[
-  //         "u_quantizedVolumeScale_" + attributeName
-  //       ] = getUniformFunction(quantizedVolumeScale);
-  //     }
+    if (defined(localMatrix)) {
+      var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
+      var inverseLocalScale = Cartesian3.divideComponents(
+        cartesian3One,
+        localScale,
+        localScale
+      );
+      modelMatrix = Matrix4.multiplyByScale(
+        modelMatrix,
+        inverseLocalScale,
+        scratchModelMatrix
+      );
+    }
 
-  //     // var uniformVarName = "model_quantizedVolumeScaleAndOctEncodedRange_" + attribute.toLowerCase();
-  //     // var
-  //   }
+    var modelViewMatrix = Matrix4.multiplyTransformation(
+      modelMatrix,
+      context.uniformState.view,
+      scratchModelMatrix
+    );
+
+    var inverseModelViewMatrix = Matrix4.inverseTransformation(
+      modelViewMatrix,
+      scratchModelMatrix
+    );
+
+    var normalMatrix = this.properties.scratchNormalMatrix;
+    normalMatrix = Matrix4.getMatrix3(inverseModelViewMatrix, normalMatrix);
+    normalMatrix = Matrix3.transpose(normalMatrix, normalMatrix);
+
+    var inverseQuantizationRange = this.properties
+      .normalInverseQuantizationRange;
+
+    if (defined(inverseQuantizationRange)) {
+      // Bake dequantization into the normal matrix
+      Matrix3.multiplyByScale(
+        normalMatrix,
+        inverseQuantizationRange,
+        normalMatrix
+      );
+    }
+
+    return normalMatrix;
+  };
+
+  return {
+    uniformMap: uniformMap,
+    uniformProperties: uniformProperties,
+  };
+}
+
+function getTangentUniforms(
+  node,
+  positionAttribute,
+  tangentAttribute,
+  context
+) {
+  var uniformMap = {};
+  var uniformProperties = {
+    scratchTangentMatrix: new Matrix3(),
+  };
+
+  if (defined(tangentAttribute.quantization)) {
+    var tangentQuantization = tangentAttribute.quantization;
+
+    var tangentOctEncoded = tangentQuantization.octEncoded;
+
+    if (tangentOctEncoded) {
+      uniformProperties.tangentOctEncodedRange =
+        tangentQuantization.normalizationRange;
+      uniformMap.u_tangentOctEncodedRange = function () {
+        return this.properties.tangentOctEncodedRange;
+      };
+    } else {
+      uniformProperties.tangentInverseQuantizationRange = Cartesian3.divideComponents(
+        cartesian3One,
+        tangentQuantization.normalizationRange,
+        new Cartesian3()
+      );
+    }
+  }
+
+  if (positionAttribute.componentDatatype !== ComponentDatatype.FLOAT) {
+    // See caveat about KHR_mesh_quantization above
+    uniformProperties.localMatrix = node._localMatrix;
+  }
+
+  uniformMap.u_tangentMatrix = function () {
+    var modelMatrix = this.properties.computedMatrix;
+    var localMatrix = this.properties.localMatrix;
+
+    if (defined(localMatrix)) {
+      var localScale = Matrix4.getScale(localMatrix, scratchLocalScale);
+      var inverseLocalScale = Cartesian3.divideComponents(
+        cartesian3One,
+        localScale,
+        localScale
+      );
+      modelMatrix = Matrix4.multiplyByScale(
+        modelMatrix,
+        inverseLocalScale,
+        scratchModelMatrix
+      );
+    }
+
+    var modelViewMatrix = Matrix4.multiplyTransformation(
+      modelMatrix,
+      context.uniformState.view,
+      scratchModelMatrix
+    );
+
+    var tangentMatrix = this.properties.scratchTangentMatrix;
+    Matrix4.getMatrix3(modelViewMatrix, tangentMatrix);
+
+    var inverseQuantizationRange = this.properties
+      .tangentInverseQuantizationRange;
+
+    if (defined(inverseQuantizationRange)) {
+      // Bake dequantization into the tangent matrix
+      Matrix3.multiplyByScale(
+        tangentMatrix,
+        inverseQuantizationRange,
+        tangentMatrix
+      );
+    }
+
+    return tangentMatrix;
+  };
+
+  return {
+    uniformMap: uniformMap,
+    uniformProperties: uniformProperties,
+  };
+}
+
+function combineUniforms(a, b) {
+  a.uniformMap = combine(a.uniformMap, b.uniformMap);
+  a.uniformProperties = combine(a.uniformProperties, b.uniformProperties);
+  return a;
+}
+
+function getAttributeUniforms(node, primitive, context) {
+  var positionAttribute = getAttributeBySemantic(primitive, "POSITION");
+  var normalAttribute = getAttributeBySemantic(primitive, "NORMAL");
+  var tangentAttribute = getAttributeBySemantic(primitive, "TANGENT");
+
+  var usesNormals = usesNormalAttribute(primitive);
+  var usesTangents = usesTangentAttribute(primitive);
+
+  var uniforms = {
+    uniformMap: {},
+    uniformProperties: {},
+  };
+
+  var positionUniforms = getPositionUniforms(node, positionAttribute, context);
+  combineUniforms(uniforms, positionUniforms);
+
+  if (usesNormals) {
+    var normalUniforms = getNormalUniforms(
+      node,
+      positionAttribute,
+      normalAttribute,
+      context
+    );
+    combineUniforms(uniforms, normalUniforms);
+  }
+
+  if (usesTangents) {
+    var tangentUniforms = getTangentUniforms(
+      node,
+      positionAttribute,
+      tangentAttribute,
+      context
+    );
+    combineUniforms(uniforms, tangentUniforms);
+  }
+
+  return uniforms;
+}
+
+function getUniformMap(model, node, primitive, context) {
+  // TODO: model matrix dirty
+  // TODO: i3dm has instance matrices in world space but EXT_mesh_gpu_instancing has then in object space
+
+  var material = primitive.material;
+
+  var uniforms = {
+    uniformMap: {},
+    uniformProperties: {},
+  };
+
+  var attributeUniforms = getAttributeUniforms(node, primitive, context);
+  combineUniforms(uniforms, attributeUniforms);
+
+  var materialUniforms = getMaterialUniforms(primitive, material, context);
+  combineUniforms(uniforms, materialUniforms);
+
+  return combine(uniforms.uniformMap, {
+    // make a separate object so that changes to the properties are seen on
+    // derived commands that combine another uniform map with this one.
+    properties: uniforms.uniformProperties,
+  });
+
+  return uniforms;
 }
 
 function createCommands(model, frameState) {
@@ -735,7 +1086,6 @@ function createCommands(model, frameState) {
         attributes[0] = attributes[positionIndex];
         attributes[positionIndex] = attributeToSwap;
       }
-      // TODO: avoid rearranging the user's data?
 
       var positionAttribute = attributes[0];
       var boundingSphere = getBoundingSphere(positionAttribute);
