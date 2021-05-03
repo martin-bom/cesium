@@ -443,15 +443,17 @@ function usesUnlitShader(primitive) {
 
 function usesNormalAttribute(primitive) {
   var normalAttribute = getAttributeBySemantic(primitive, "NORMAL");
-  var usesNormalTexture = defined(primitive.material.normalTexture);
-  return (
-    defined(normalAttribute) && !usesUnlitShader(primitive) && usesNormalTexture
-  );
+  return defined(normalAttribute) && !usesUnlitShader(primitive);
 }
 
 function usesTangentAttribute(primitive) {
   var tangentAttribute = getAttributeBySemantic(primitive, "TANGENT");
-  return defined(tangentAttribute) && usesNormalAttribute(primitive);
+  var usesNormalTexture = defined(primitive.material.normalTexture);
+  return (
+    defined(tangentAttribute) &&
+    usesNormalAttribute(primitive) &&
+    usesNormalTexture
+  );
 }
 
 function getMaterialUniforms(primitive, material, context) {

@@ -1,3 +1,24 @@
+#ifdef FRAGMENT_SHADING
+    // TODO: position may be needed for styling
+    varying vec3 v_positionEC;
+    #ifdef USE_NORMAL
+        varying vec3 v_normalEC;
+    #endif
+    #ifdef USE_TANGENT
+        varying vec3 v_tangentEC;
+        varying vec3 v_bitangentEC;
+    #endif
+    #ifdef USE_TEXCOORD_0
+        varying vec2 v_texCoord0;
+    #endif
+    #ifdef USE_TEXCOORD_1
+        varying vec2 v_texCoord1;
+    #endif
+    #ifdef USE_VERTEX_COLOR
+        varying vec4 v_vertexColor;
+    #endif
+#endif
+
 attribute vec3 a_position;
 
 #ifdef POSITION_QUANTIZED
@@ -15,14 +36,8 @@ attribute vec3 a_position;
     }
 #endif
 
-#ifdef FRAGMENT_SHADING
-    // TODO: position may be needed for styling
-    varying vec3 v_positionEC;
-#endif
-
 #ifdef USE_NORMAL
     uniform mat3 u_normalMatrix;
-    varying vec3 v_normalEC;
 
     #ifdef NORMAL_OCT_ENCODED
         uniform float u_normalOctEncodedRange;
@@ -56,8 +71,6 @@ attribute vec3 a_position;
 
 #ifdef USE_TANGENT
     uniform mat3 u_tangentMatrix;
-    varying vec3 v_tangentEC;
-    varying vec3 v_bitangentEC;
 
     #ifdef TANGENT_OCT_ENCODED
         uniform float u_tangentOctEncodedRange;
@@ -104,79 +117,75 @@ attribute vec3 a_position;
 
 #ifdef USE_TEXCOORD_0
     attribute vec2 a_texCoord0;
-    varying vec2 v_texCoord0;
 
     #ifdef TEXCOORD_0_QUANTIZED
-        uniform vec2 u_texcoord0DequantizationOffset;
-        uniform vec2 u_texcoord0DequantizationScale;
+        uniform vec2 u_texCoord0DequantizationOffset;
+        uniform vec2 u_texCoord0DequantizationScale;
 
-        vec2 readTexcoord0(in vec2 texcoord0)
+        vec2 readTexCoord0(in vec2 texCoord0)
         {
-            return texcoord0 * u_texcoord0DequantizationScale + u_texcoord0DequantizationOffset;
+            return texCoord0 * u_texCoord0DequantizationScale + u_texCoord0DequantizationOffset;
         }
     #else
-        vec2 readTexcoord0(in vec2 texcoord0)
+        vec2 readTexCoord0(in vec2 texCoord0)
         {
-            return texcoord0;
+            return texCoord0;
         }
     #endif
 #endif
 
 #ifdef USE_TEXCOORD_1
     attribute vec2 a_texCoord1;
-    varying vec2 v_texCoord1;
 
     #ifdef TEXCOORD_1_QUANTIZED
-        uniform vec2 u_texcoord1DequantizationOffset;
-        uniform vec2 u_texcoord1DequantizationScale;
+        uniform vec2 u_texCoord1DequantizationOffset;
+        uniform vec2 u_texCoord1DequantizationScale;
 
-        vec2 readTexcoord1(in vec2 texcoord1)
+        vec2 readTexCoord1(in vec2 texCoord1)
         {
-            return texcoord1 * u_texcoord1DequantizationScale + u_texcoord1DequantizationOffset;
+            return texCoord1 * u_texCoord1DequantizationScale + u_texCoord1DequantizationOffset;
         }
     #else
-        vec2 readTexcoord1(in vec2 texcoord1)
+        vec2 readTexCoord1(in vec2 texCoord1)
         {
-            return texcoord1;
+            return texCoord1;
         }
     #endif
 #endif
 
-#ifdef USE_COLOR
-    #ifdef COLOR_RGB
-        attribute vec3 a_color;
-        varying vec3 v_color;
+#ifdef USE_VERTEX_COLOR
+    #ifdef VERTEX_COLOR_RGB
+        attribute vec3 a_vertexColor;
 
-        #ifdef COLOR_QUANTIZED
-            uniform vec3 u_colorDequantizationOffset;
-            uniform vec3 u_colorDequantizationScale;
+        #ifdef VERTEX_COLOR_QUANTIZED
+            uniform vec3 u_vertexColorDequantizationOffset;
+            uniform vec3 u_vertexColorDequantizationScale;
 
-            vec4 readColor(in vec3 color)
+            vec4 readVertexColor(in vec3 vertexColor)
             {
-                return vec4(color * u_colorDequantizationScale + u_colorDequantizationOffset, 1.0);
+                return vec4(vertexColor * u_vertexColorDequantizationScale + u_vertexColorDequantizationOffset, 1.0);
             }
         #else
-            vec4 readColor(in vec3 color)
+            vec4 readVertexColor(in vec3 vertexColor)
             {
-                return vec4(color, 1.0);
+                return vec4(vertexColor, 1.0);
             }
         #endif
     #else
-        attribute vec4 a_color;
-        varying vec4 v_color;
+        attribute vec4 a_vertexColor;
 
-        #ifdef COLOR_QUANTIZED
-            uniform vec4 u_colorDequantizationOffset;
-            uniform vec4 u_colorDequantizationScale;
+        #ifdef VERTEX_COLOR_QUANTIZED
+            uniform vec4 u_vertexColorDequantizationOffset;
+            uniform vec4 u_vertexColorDequantizationScale;
 
-            vec4 readColor(in vec4 color)
+            vec4 readVertexColor(in vec4 vertexColor)
             {
-                return color * u_colorDequantizationScale + u_colorDequantizationOffset;
+                return vertexColor * u_vertexColorDequantizationScale + u_vertexColorDequantizationOffset;
             }
         #else
-            vec4 readColor(in vec4 color)
+            vec4 readVertexColor(in vec4 vertexColor)
             {
-                return color;
+                return vertexColor;
             }
         #endif
     #endif
@@ -469,11 +478,7 @@ void main()
         position = instanceMatrix * position;
     #endif
 
-    #ifdef USE_LIGHTING
-        v_positionEC = czm_modelView * position;
-    #endif
-
-    gl_Position = czm_modelViewProjection * position;
+    vec3 positionEC = czm_modelView * position;
 
     #ifdef USE_NORMAL
         vec3 normal = readNormal(a_normal);
@@ -490,11 +495,12 @@ void main()
             normal = transpose(inverse(mat3(instanceMatrix))) * normal;
         #endif
 
-        v_normalEC = normalize(u_normalMatrix * normal);
+        vec3 normalEC = normalize(u_normalMatrix * normal);
     #endif
 
     #ifdef USE_TANGENT
         vec3 tangent = readTangent(a_tangent);
+        float tangentHandedness = readTangentHandedness(a_tangent);
 
         #ifdef USE_MORPH_TARGETS
             tangent += getTargetTangent();
@@ -508,21 +514,61 @@ void main()
             tangent = mat3(instanceMatrix) * tangent;
         #endif
 
-        tangent = normalize(tangent);
-
-        v_tangentEC = normalize(u_tangentMatrix * tangent);
-        v_bitangentEC = cross(v_normalEC, v_tangentEC) * readTangentHandedness(a_tangent);
+        vec3 tangentEC = normalize(u_tangentMatrix * tangent);
+        vec3 bitangentEC = cross(normalEC, tangentEC) * tangentHandedness;
     #endif
 
     #ifdef USE_TEXCOORD_0
-        v_texcoord_0 = readTexcoord0(a_texcoord_0);
+        vec2 texCoord0 = readTexCoord0(a_texCoord_0);
     #endif
 
     #ifdef USE_TEXCOORD_1
-        v_texcoord_1 = readTexcoord1(a_texcoord_1);
+        vec2 texCoord1 = readTexCoord1(a_texCoord_1);
     #endif
 
-    #ifdef USE_COLOR
-        v_color = readColor(a_color);
+    #ifdef USE_VERTEX_COLOR
+        vec4 vertexColor = readVertexColor(a_vertexColor);
     #endif
+
+    #ifdef FRAGMENT_SHADING
+        v_positionEC = positionEC;
+        #ifdef USE_NORMAL
+            v_normalEC = normalEC;
+        #endif
+        #ifdef USE_TANGENT
+            v_tangentEC = tangentEC;
+            v_bitangentEC = bitangentEC;
+        #endif
+        #ifdef USE_TEXCOORD_0
+            v_texCoord0 = texCoord0;
+        #endif
+        #ifdef USE_TEXCOORD_1
+            v_texCoord1 = texCoord1;
+        #endif
+        #ifdef USE_VERTEX_COLOR
+            v_vertexColor = vertexColor;
+        #endif
+    #else
+        vec4 color = getColor(
+            positionEC,
+            #ifdef USE_NORMAL
+                normalEC,
+            #endif
+            #ifdef USE_TANGENT
+                tangentEC,
+                bitangentEC,
+            #endif
+            #ifdef USE_TEXCOORD_0
+                texCoord0,
+            #endif
+            #ifdef USE_TEXCOORD_1
+                texCoord1,
+            #endif
+            #ifdef USE_VERTEX_COLOR
+                vertexColor
+            #endif
+        )
+    #endif
+
+    gl_Position = czm_modelViewProjection * position;
 }
