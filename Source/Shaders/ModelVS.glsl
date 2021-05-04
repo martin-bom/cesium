@@ -17,6 +17,8 @@
     #ifdef USE_VERTEX_COLOR
         varying vec4 v_vertexColor;
     #endif
+#else
+    varying vec4 v_finalColor;
 #endif
 
 attribute vec3 a_position;
@@ -549,7 +551,7 @@ void main()
             v_vertexColor = vertexColor;
         #endif
     #else
-        vec4 color = getColor(
+        v_finalColor = getColor(
             positionEC,
             #ifdef USE_NORMAL
                 normalEC,
@@ -567,7 +569,7 @@ void main()
             #ifdef USE_VERTEX_COLOR
                 vertexColor
             #endif
-        )
+        );
     #endif
 
     gl_Position = czm_modelViewProjection * position;

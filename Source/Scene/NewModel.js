@@ -436,6 +436,10 @@ function usesTextureTransform(texture) {
   return !Matrix3.equals(texture.transform, Matrix3.IDENTITY);
 }
 
+function usesTexCoord0(texture) {
+  return texture.texCoord === 0;
+}
+
 function usesUnlitShader(primitive) {
   var normalAttribute = getAttributeBySemantic(primitive, "NORMAL");
   return !defined(normalAttribute) || primitive.material.unlit;
@@ -497,12 +501,20 @@ function getMaterialUniforms(primitive, material, context) {
     usesSpecularGlossiness &&
     !Cartesian3.equals(specularGlossiness.specularFactor, cartesian3One);
 
+  var usesGlossinessFactor =
+    !unlit &&
+    usesSpecularGlossiness &&
+    specularGlossiness.glossinessFactor !== 1.0;
+
   var usesBaseColorTexture =
     usesMetallicRoughness && defined(metallicRoughness.baseColorTexture);
 
   var usesBaseColorTextureTransform =
     usesBaseColorTexture &&
     usesTextureTransform(metallicRoughness.baseColorTexture);
+
+  var usesBaseColorTexCoord0 =
+    usesBaseColorTexture && usesTexCoord0(metallicRoughness.baseColorTexture);
 
   var usesMetallicRoughnessTexture =
     !unlit &&
@@ -512,6 +524,10 @@ function getMaterialUniforms(primitive, material, context) {
   var usesMetallicRoughnessTextureTransform =
     usesMetallicRoughnessTexture &&
     usesTextureTransform(metallicRoughness.metallicRoughnessTexture);
+
+  var usesMetallicRoughnessTexCoord0 =
+    usesMetallicRoughnessTexture &&
+    usesTexCoord0(metallicRoughness.metallicRoughnessTexture);
 
   var usesBaseColorFactor =
     usesMetallicRoughness &&
@@ -525,25 +541,32 @@ function getMaterialUniforms(primitive, material, context) {
     usesMetallicRoughness &&
     metallicRoughness.roughnessFactor !== 1.0;
 
-  var usesEmissiveTexture = defined(material.emissiveTexture);
+  var usesEmissiveTexture = !unlit && defined(material.emissiveTexture);
 
   var usesEmissiveTextureTransform =
     usesEmissiveTexture && usesTextureTransform(material.emissiveTexture);
+
+  var usesEmissiveTexCoord0 =
+    usesEmissiveTexture && usesTexCoord0(material.emissiveTexture);
 
   var usesNormalTexture = defined(material.normalTexture) && usesTangents; // Normal mapping requires tangents
 
   var usesNormalTextureTransform =
     usesNormalTexture && usesTextureTransform(material.normalTexture);
 
-  var usesOcclusionTexture = defined(material.occlusionTexture);
+  var usesNormalTexCoord0 =
+    usesNormalTexture && usesTexCoord0(material.normalTexture);
+
+  var usesOcclusionTexture = !unlit && defined(material.occlusionTexture);
 
   var usesOcclusionTextureTransform =
     usesOcclusionTexture && usesTextureTransform(material.occlusionTexture);
 
-  var usesEmissiveFactor = !Cartesian3.equals(
-    material.emissiveFactor,
-    Cartesian3.ZERO
-  );
+  var usesOcclusionTexCoord0 =
+    usesOcclusionTexture && usesTexCoord0(material.occlusionTexture);
+
+  var usesEmissiveFactor =
+    !unlit && !Cartesian3.equals(material.emissiveFactor, Cartesian3.ZERO);
 
   var usesAlphaCutoff = material.alphaMode === AlphaMode.MASK;
 
@@ -589,6 +612,12 @@ function getMaterialUniforms(primitive, material, context) {
   if (usesSpecularFactor) {
     uniformMap.u_specularFactor = function () {
       return this.properties.material.specularGlossiness.specularFactor;
+    };
+  }
+
+  if (usesGlossinessFactor) {
+    uniformMap.u_glossinessFactor = function () {
+      return this.properties.material.specularGlossiness.glossinessFactor;
     };
   }
 
