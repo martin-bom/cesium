@@ -30,22 +30,41 @@ varying float v_feature_id_1;
 
 void main()
 {
+    vec3 positionEC = v_positionEC;
+
     #ifdef FRAGMENT_SHADING
         #ifdef USE_NORMAL
-            vec3 normal = normalize(v_normalEC);
+            vec3 normalEC = normalize(v_normalEC);
         #endif
-        #ifdef USE_TANGENT
-            vec3 tangent = normalize(v_tangentEC);
-            vec3 bitangent = normalize(v_bitangentEC);
+        #ifdef USE_NORMAL_TEXTURE
+            #ifdef USE_TANGENT
+                vec3 tangent = normalize(v_tangentEC);
+                vec3 bitangent = normalize(v_bitangentEC);
+            #else
+                #ifdef GL_OES_standard_derivatives
+                #extension GL_OES_standard_derivatives : enable
+                #endif
+
+                vec3 pos_dx = dFdx(positionEC);
+                vec3 pos_dy = dFdy(positionEC);
+
+                vec2 texcoord = getNormalTexCoord(NORMAL_TEXCOORD);
+                vec3 tex_dx = dFdx(vec3(normalTexCoord, 0.0));
+                vec3 tex_dy = dFdy(vec3(normalTexCoord, 0.0));
+
+                vec3 tangentEC = (tex_dy.t * pos_dx - tex_dx.t * pos_dy) / (tex_dx.s * tex_dy.t - tex_dy.s * tex_dx.t);
+                tangentEC = normalize(tangent - normalEC * dot(normalEC, tangent));
+                vec3 bitangentEC = cross(normalEC, tangentEC);
+            #endif
         #endif
 
         #if defined(USE_DOUBLE_SIDED) && defined(USE_NORMAL)
             if (czm_backFacing())
             {
                 normalEC *= -1.0;
-                #ifdef USE_TANGENT
-                    tangentEC *= 1.0;
-                    bitangentEC *= 1.0;
+                #ifdef USE_NORMAL_TEXTURE
+                    tangentEC *= -1.0;
+                    bitangentEC *= -1.0;
                 #endif
             }
         #endif
@@ -55,7 +74,7 @@ void main()
             #ifdef USE_NORMAL
                 normalEC,
             #endif
-            #ifdef USE_TANGENT
+            #ifdef USE_NORMAL_TEXTURE
                 tangentEC,
                 bitangentEC,
             #endif

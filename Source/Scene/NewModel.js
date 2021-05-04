@@ -474,6 +474,7 @@ function getMaterialUniforms(primitive, material, context) {
     defined(metallicRoughness) && !usesSpecularGlossiness;
 
   var unlit = usesUnlitShader(primitive);
+  var usesNormals = usesNormalAttribute(primitive);
   var usesTangents = usesTangentAttribute(primitive);
 
   var usesDiffuseTexture =
@@ -549,7 +550,10 @@ function getMaterialUniforms(primitive, material, context) {
   var usesEmissiveTexCoord0 =
     usesEmissiveTexture && usesTexCoord0(material.emissiveTexture);
 
-  var usesNormalTexture = defined(material.normalTexture) && usesTangents; // Normal mapping requires tangents
+  var usesNormalTexture =
+    defined(material.normalTexture) &&
+    usesNormals &&
+    (usesTangents || context.standardDerivatives);
 
   var usesNormalTextureTransform =
     usesNormalTexture && usesTextureTransform(material.normalTexture);

@@ -207,10 +207,11 @@ vec4 getColor(
         return color;
     #endif
 
-    #ifdef USE_NORMAL_TEXTURE
+    #if defined(USE_NORMAL_TEXTURE)
         vec2 normalTexCoord = getNormalTexCoord(NORMAL_TEXCOORD);
         vec3 normal = texture2D(u_normalTexture, normalTexCoord).rgb;
         normal = normalize(normal * 2.0 - vec3(1.0));
+        
         normalEC = mat3(tangentEC, bitangentEC, normalEC) * normal;
     #endif
 
@@ -254,6 +255,7 @@ vec4 getColor(
         return czm_pbrMetallicRoughness(
             normalEC,
             czm_lightDirectionEC,
+            czm_lightColorHdr,
             color,
             metallic,
             roughness,
