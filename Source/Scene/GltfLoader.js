@@ -49,8 +49,8 @@ var GltfLoaderState = {
   LOADING: 1,
   READY_TO_PROCESS: 2,
   PROCESSING: 3,
-  READY_TO_FINALIZE: 4
-  PROCESSING_TEXTURES: 4
+  READY_TO_FINALIZE: 4,
+  PROCESSING_TEXTURES: 4,
   READY: 4,
   FAILED: 5,
 };
@@ -484,6 +484,7 @@ function loadInstancedAttribute(
   gltf,
   accessorId,
   semantic,
+  loadAsTypedArray,
   frameState
 ) {
   var accessor = gltf.accessors[accessorId];
@@ -495,7 +496,7 @@ function loadInstancedAttribute(
     return attribute;
   }
 
-  if (frameState.context.instancedArrays) {
+  if (!loadAsTypedArray && frameState.context.instancedArrays) {
     // Only create a GPU buffer if the browser supports WebGL instancing
     // Don't pass in draco object since instanced attributes can't be draco compressed
     var vertexBufferLoader = loadVertexBuffer(
@@ -582,8 +583,8 @@ function loadTexture(loader, gltf, textureInfo, supportedImageFormats) {
   loader._textureLoaders.push(textureLoader);
 
   var texture = GltfLoaderUtil.createModelTexture({
-    textureInfo: textureInfo
-  })
+    textureInfo: textureInfo,
+  });
 
   textureLoader.promise.then(function (textureLoader) {
     if (loader.isDestroyed()) {
@@ -848,15 +849,43 @@ function loadPrimitive(
   return primitive;
 }
 
+function getAttributeBySemantic(attributes, semantic) {
+  var attributesLength = attributes.length;
+  for (var i = 0; i < attributesLength; ++i) {
+    var attribute = attributes[i];
+    if (attribute.semantic === semantic) {
+      return attribute;
+    }
+  }
+  return undefined;
+}
+
 function loadInstances(loader, gltf, instancingExtension, frameState) {
   var instances = new Instances();
   var attributes = instancingExtension.attributes;
   if (defined(attributes)) {
+    var hasRotation = defined(getAttributeBySemantic(attributes, "ROTATION"));
     for (var semantic in attributes) {
       if (attributes.hasOwnProperty(semantic)) {
+        // If the instances have rotations load the attributes as typed arrays
+        // so that instance matrices are computed on the CPU. This avoids the
+        // expensive quaternion -> rotation matrix conversion in the shader.
+        var loadAsTypedArray =
+          hasRotation &&
+          (semantic === "TRANSLATION" ||
+            semantic === "ROTATION" ||
+            semantic === "SCALE");
+
         var accessorId = attributes[semantic];
         instances.attributes.push(
-          loadInstancedAttribute(loader, gltf, accessorId, semantic, frameState)
+          loadInstancedAttribute(
+            loader,
+            gltf,
+            accessorId,
+            semantic,
+            loadAsTypedArray,
+            frameState
+          )
         );
       }
     }
