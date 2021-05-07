@@ -2,6 +2,7 @@ import Cartesian3 from "../Core/Cartesian3.js";
 import Cartesian4 from "../Core/Cartesian4.js";
 import defined from "../Core/defined.js";
 import Matrix3 from "../Core/Matrix3.js";
+import PrimitiveType from "../Core/PrimitiveType.js";
 import AlphaMode from "./AlphaMode.js";
 import AttributeType from "./AttributeType.js";
 
@@ -9,46 +10,47 @@ var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
 
 function ModelCommandInfo(node, primitive, context) {
-  this.materialInfo = getMaterialInfo(primitive, context);
-  this.useFragmentShading = false;
+  var materialInfo = getMaterialInfo(primitive, context);
+  var geometryInfo = getGeometryInfo(node, primitive, materialInfo, context);
+
+  this.materialInfo = materialInfo;
+  this.geometryInfo = geometryInfo;
+  this.useFragmentShading = primitive.primitiveType === PrimitiveType.POINTS;
 }
 
-ModelCommandInfo.prototype.getShaderKey = function () {};
+ModelCommandInfo.prototype.getShaderKey = function () {
+  var materialKey = this.materialInfo.getShaderKey();
+  var geometryKey = this.geometryInfo.getShaderKey();
+  var otherKey = Number(this.useFragmentShading);
 
-function AttributeInfo() {
+  return materialKey + "_" + geometryKey + "_" + otherKey;
+};
+
+function GeometryInfo() {
   this.usesNormals = false;
   this.usesNormalsOctEncoded = false;
   this.usesNormalsOctEncodedZXY = false;
   this.usesNormalsQuantized = false;
-
   this.usesTangents = false;
   this.usesTangentsOctEncoded = false;
   this.usesTangentsOctEncodedZXY = false;
   this.usesTangentsQuantized = false;
-
   this.usesTexCoord0 = false;
   this.usesTexCoord0Quantized = false;
-
   this.usesTexCoord1 = false;
   this.usesTexCoord1Quantized = false;
-
   this.usesVertexColor = false;
   this.usesVertexColorRGB = false;
   this.usesVertexColorQuantized = false;
-
   this.usesPositionsQuantized = false;
-
   this.usesInstancing = false;
   this.usesInstancedTranslation = false;
   this.usesInstancedRotation = false;
   this.usesInstancedScale = false;
   this.usesInstancedFeatureId0 = false;
   this.usesInstancedFeatureId1 = false;
-
   this.usesSkinning = false;
   this.usesWeightsQuantized = false;
-  this.jointCount = 0;
-
   this.usesMorphTargets = false;
   this.usesTargetPosition0 = false;
   this.usesTargetPosition1 = false;
@@ -66,9 +68,59 @@ function AttributeInfo() {
   this.usesTargetTangent1 = false;
   this.usesTargetTangent2 = false;
   this.usesTargetTangent3 = false;
+  this.jointCount = 0;
 
   this.usedVertexAttributesLength = 0;
 }
+
+GeometryInfo.prototype.getShaderKey = function () {
+  var part1 =
+    this.usesNormals |
+    (this.usesNormalsOctEncoded << 2) |
+    (this.usesNormalsOctEncodedZXY << 3) |
+    (this.usesNormalsQuantized << 4) |
+    (this.usesTangents << 5) |
+    (this.usesTangentsOctEncoded << 6) |
+    (this.usesTangentsOctEncodedZXY << 7) |
+    (this.usesTangentsQuantized << 8) |
+    (this.usesTexCoord0 << 9) |
+    (this.usesTexCoord0Quantized << 10) |
+    (this.usesTexCoord1 << 11) |
+    (this.usesTexCoord1Quantized << 12) |
+    (this.usesVertexColor << 13) |
+    (this.usesVertexColorRGB << 14) |
+    (this.usesVertexColorQuantized << 15) |
+    (this.usesPositionsQuantized << 16) |
+    (this.usesInstancing << 17) |
+    (this.usesInstancedTranslation << 18) |
+    (this.usesInstancedRotation << 19) |
+    (this.usesInstancedScale << 20) |
+    (this.usesInstancedFeatureId0 << 21) |
+    (this.usesInstancedFeatureId1 << 22) |
+    (this.usesSkinning << 23) |
+    (this.usesWeightsQuantized << 24) |
+    (this.usesMorphTargets << 25) |
+    (this.usesTargetPosition0 << 26) |
+    (this.usesTargetPosition1 << 27) |
+    (this.usesTargetPosition2 << 28) |
+    (this.usesTargetPosition3 << 29) |
+    (this.usesTargetPosition4 << 30) |
+    (this.usesTargetPosition5 << 31);
+
+  var part2 =
+    this.usesTargetPosition6 |
+    (this.usesTargetPosition7 << 2) |
+    (this.usesTargetNormal0 << 3) |
+    (this.usesTargetNormal1 << 4) |
+    (this.usesTargetNormal2 << 5) |
+    (this.usesTargetNormal3 << 6) |
+    (this.usesTargetTangent0 << 7) |
+    (this.usesTargetTangent1 << 8) |
+    (this.usesTargetTangent2 << 9) |
+    (this.usesTargetTangent3 << 10);
+
+  return part1 + "_" + part2 + "_" + this.jointCount;
+};
 
 function MaterialInfo() {
   this.usesDiffuseTexture = false;
@@ -105,6 +157,45 @@ function MaterialInfo() {
   this.usesSpecularGlossiness = false;
   this.usesMetallicRoughness = false;
 }
+
+MaterialInfo.prototype.getShaderKey = function () {
+  var part1 =
+    this.usesDiffuseTexture |
+    (this.usesDiffuseTextureTransform << 2) |
+    (this.usesDiffuseTexCoord0 << 3) |
+    (this.usesSpecularGlossinessTexture << 4) |
+    (this.usesSpecularGlossinessTextureTransform << 5) |
+    (this.usesSpecularGlossinessTexCoord0 << 6) |
+    (this.usesDiffuseFactor << 7) |
+    (this.usesSpecularFactor << 8) |
+    (this.usesGlossinessFactor << 9) |
+    (this.usesBaseColorTexture << 10) |
+    (this.usesBaseColorTextureTransform << 11) |
+    (this.usesBaseColorTexCoord0 << 12) |
+    (this.usesMetallicRoughnessTexture << 13) |
+    (this.usesMetallicRoughnessTextureTransform << 14) |
+    (this.usesMetallicRoughnessTexCoord0 << 15) |
+    (this.usesBaseColorFactor << 16) |
+    (this.usesMetallicFactor << 17) |
+    (this.usesRoughnessFactor << 18) |
+    (this.usesEmissiveTexture << 19) |
+    (this.usesEmissiveTextureTransform << 20) |
+    (this.usesEmissiveTexCoord0 << 21) |
+    (this.usesNormalTexture << 22) |
+    (this.usesNormalTextureTransform << 23) |
+    (this.usesNormalTexCoord0 << 24) |
+    (this.usesOcclusionTexture << 25) |
+    (this.usesOcclusionTextureTransform << 26) |
+    (this.usesOcclusionTexCoord0 << 27) |
+    (this.usesEmissiveFactor << 28) |
+    (this.usesDoubleSided << 29) |
+    (this.usesAlphaCutoff << 30) |
+    (this.usesUnlitShader << 31);
+
+  var part2 = this.usesSpecularGlossiness | (this.usesMetallicRoughness << 2);
+
+  return part1 + "_" + part2;
+};
 
 function materialUsesTexCoord0(materialInfo) {
   return (
@@ -358,9 +449,9 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   for (var i = 0; i < morphTargetsLength; ++i) {
     var morphTarget = morphTargets[i];
     var attributes = morphTarget.attributes;
-    var positionAttribute = getAttributeBySemantic(attributes, "POSITION");
-    var normalAttribute = getAttributeBySemantic(attributes, "NORMAL");
-    var tangentAttribute = getAttributeBySemantic(attributes, "TANGENT");
+    var morphPositionAttribute = getAttributeBySemantic(attributes, "POSITION");
+    var morphNormalAttribute = getAttributeBySemantic(attributes, "NORMAL");
+    var morphTangentAttribute = getAttributeBySemantic(attributes, "TANGENT");
   }
 
   // TODO: custom vertex attributes used in a style or custom shader
@@ -374,55 +465,53 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
     usesVertexColor +
     usedInstanceAttributesLength;
 
-  var attributeInfo = new AttributeInfo();
-  attributeInfo.usesNormals = usesNormals;
-  attributeInfo.usesNormalsOctEncoded = usesNormalsOctEncoded;
-  attributeInfo.usesNormalsOctEncodedZXY = usesNormalsOctEncodedZXY;
-  attributeInfo.usesNormalsQuantized = usesNormalsQuantized;
-  attributeInfo.usesTangents = usesTangents;
-  attributeInfo.usesTangentsOctEncoded = usesTangentsOctEncoded;
-  attributeInfo.usesTangentsOctEncodedZXY = usesTangentsOctEncodedZXY;
-  attributeInfo.usesTangentsQuantized = usesTangentsQuantized;
-  attributeInfo.usesTexCoord0 = usesTexCoord0;
-  attributeInfo.usesTexCoord0Quantized = usesTexCoord0Quantized;
-  attributeInfo.usesTexCoord1 = usesTexCoord1;
-  attributeInfo.usesTexCoord1Quantized = usesTexCoord1Quantized;
-  attributeInfo.usesVertexColor = usesVertexColor;
-  attributeInfo.usesVertexColorRGB = usesVertexColorRGB;
-  attributeInfo.usesVertexColorQuantized = usesVertexColorQuantized;
-  attributeInfo.usesPositionsQuantized = usesPositionsQuantized;
-  attributeInfo.usesInstancing = usesInstancing;
-  attributeInfo.usesInstancedTranslation = usesInstancedTranslation;
-  attributeInfo.usesInstancedRotation = usesInstancedRotation;
-  attributeInfo.usesInstancedScale = usesInstancedScale;
-  attributeInfo.usesInstancedFeatureId0 = usesInstancedFeatureId0;
-  attributeInfo.usesInstancedFeatureId1 = usesInstancedFeatureId1;
+  var geometryInfo = new GeometryInfo();
+  geometryInfo.usesNormals = usesNormals;
+  geometryInfo.usesNormalsOctEncoded = usesNormalsOctEncoded;
+  geometryInfo.usesNormalsOctEncodedZXY = usesNormalsOctEncodedZXY;
+  geometryInfo.usesNormalsQuantized = usesNormalsQuantized;
+  geometryInfo.usesTangents = usesTangents;
+  geometryInfo.usesTangentsOctEncoded = usesTangentsOctEncoded;
+  geometryInfo.usesTangentsOctEncodedZXY = usesTangentsOctEncodedZXY;
+  geometryInfo.usesTangentsQuantized = usesTangentsQuantized;
+  geometryInfo.usesTexCoord0 = usesTexCoord0;
+  geometryInfo.usesTexCoord0Quantized = usesTexCoord0Quantized;
+  geometryInfo.usesTexCoord1 = usesTexCoord1;
+  geometryInfo.usesTexCoord1Quantized = usesTexCoord1Quantized;
+  geometryInfo.usesVertexColor = usesVertexColor;
+  geometryInfo.usesVertexColorRGB = usesVertexColorRGB;
+  geometryInfo.usesVertexColorQuantized = usesVertexColorQuantized;
+  geometryInfo.usesPositionsQuantized = usesPositionsQuantized;
+  geometryInfo.usesInstancing = usesInstancing;
+  geometryInfo.usesInstancedTranslation = usesInstancedTranslation;
+  geometryInfo.usesInstancedRotation = usesInstancedRotation;
+  geometryInfo.usesInstancedScale = usesInstancedScale;
+  geometryInfo.usesInstancedFeatureId0 = usesInstancedFeatureId0;
+  geometryInfo.usesInstancedFeatureId1 = usesInstancedFeatureId1;
+  geometryInfo.usesSkinning = usesSkinning;
+  geometryInfo.usesWeightsQuantized = usesWeightsQuantized;
+  geometryInfo.usesMorphTargets = usesMorphTargets;
+  geometryInfo.usesTargetPosition0 = false;
+  geometryInfo.usesTargetPosition1 = false;
+  geometryInfo.usesTargetPosition2 = false;
+  geometryInfo.usesTargetPosition3 = false;
+  geometryInfo.usesTargetPosition4 = false;
+  geometryInfo.usesTargetPosition5 = false;
+  geometryInfo.usesTargetPosition6 = false;
+  geometryInfo.usesTargetPosition7 = false;
+  geometryInfo.usesTargetNormal0 = false;
+  geometryInfo.usesTargetNormal1 = false;
+  geometryInfo.usesTargetNormal2 = false;
+  geometryInfo.usesTargetNormal3 = false;
+  geometryInfo.usesTargetTangent0 = false;
+  geometryInfo.usesTargetTangent1 = false;
+  geometryInfo.usesTargetTangent2 = false;
+  geometryInfo.usesTargetTangent3 = false;
+  geometryInfo.jointCount = jointCount;
 
-  attributeInfo.usesSkinning = usesSkinning;
-  attributeInfo.usesWeightsQuantized = usesWeightsQuantized;
-  attributeInfo.jointCount = jointCount;
+  geometryInfo.usedVertexAttributesLength = usedVertexAttributesLength;
 
-  attributeInfo.usesMorphTargets = usesMorphTargets;
-  attributeInfo.usesTargetPosition0 = false;
-  attributeInfo.usesTargetPosition1 = false;
-  attributeInfo.usesTargetPosition2 = false;
-  attributeInfo.usesTargetPosition3 = false;
-  attributeInfo.usesTargetPosition4 = false;
-  attributeInfo.usesTargetPosition5 = false;
-  attributeInfo.usesTargetPosition6 = false;
-  attributeInfo.usesTargetPosition7 = false;
-  attributeInfo.usesTargetNormal0 = false;
-  attributeInfo.usesTargetNormal1 = false;
-  attributeInfo.usesTargetNormal2 = false;
-  attributeInfo.usesTargetNormal3 = false;
-  attributeInfo.usesTargetTangent0 = false;
-  attributeInfo.usesTargetTangent1 = false;
-  attributeInfo.usesTargetTangent2 = false;
-  attributeInfo.usesTargetTangent3 = false;
-
-  attributeInfo.usedVertexAttributesLength = usedVertexAttributesLength;
-
-  return attributeInfo;
+  return geometryInfo;
 }
 
 function getMaterialInfo(primitive, context) {
