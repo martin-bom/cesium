@@ -61,7 +61,7 @@ var GltfLoaderState = {
  * Implements the {@link ResourceLoader} interface.
  * </p>
  *
- * @alias GltfLoader
+ * @alias GltfLoaderfunction Texture
  * @constructor
  * @augments ResourceLoader
  *

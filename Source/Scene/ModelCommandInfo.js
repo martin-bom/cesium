@@ -39,8 +39,11 @@ function AttributeInfo() {
   this.usesPositionsQuantized = false;
 
   this.usesInstancing = false;
-  this.usesInstancingFeatureId0 = false;
-  this.usesInstancingFeatureId1 = false;
+  this.usesInstancedTranslation = false;
+  this.usesInstancedRotation = false;
+  this.usesInstancedScale = false;
+  this.usesInstancedFeatureId0 = false;
+  this.usesInstancedFeatureId1 = false;
 
   this.usesSkinning = false;
   this.usesWeightsQuantized = false;
@@ -63,6 +66,8 @@ function AttributeInfo() {
   this.usesTargetTangent1 = false;
   this.usesTargetTangent2 = false;
   this.usesTargetTangent3 = false;
+
+  this.usedVertexAttributesLength = 0;
 }
 
 function MaterialInfo() {
@@ -150,14 +155,6 @@ function getAttributeBySemantic(attributes, semantic) {
   return undefined;
 }
 
-function getVertexAttributeBySemantic(primitive, semantic) {
-  return getAttributeBySemantic(primitive.attributes, semantic);
-}
-
-function getInstanceAttributeBySemantic(instances, semantic) {
-  return getAttributeBySemantic(instances.attributes, semantic);
-}
-
 function usesTextureTransform(texture) {
   return !Matrix3.equals(texture.transform, Matrix3.IDENTITY);
 }
@@ -167,17 +164,20 @@ function usesTexCoord0(texture) {
 }
 
 function usesUnlitShader(primitive) {
-  var normalAttribute = getVertexAttributeBySemantic(primitive, "NORMAL");
+  var normalAttribute = getAttributeBySemantic(primitive.attributes, "NORMAL");
   return !defined(normalAttribute) || primitive.material.unlit;
 }
 
 function usesNormalAttribute(primitive) {
-  var normalAttribute = getVertexAttributeBySemantic(primitive, "NORMAL");
+  var normalAttribute = getAttributeBySemantic(primitive.attributes, "NORMAL");
   return defined(normalAttribute) && !usesUnlitShader(primitive);
 }
 
 function usesTangentAttribute(primitive) {
-  var tangentAttribute = getVertexAttributeBySemantic(primitive, "TANGENT");
+  var tangentAttribute = getAttributeBySemantic(
+    primitive.attributes,
+    "TANGENT"
+  );
   var usesNormalTexture = defined(primitive.material.normalTexture);
   return (
     defined(tangentAttribute) &&
@@ -187,34 +187,40 @@ function usesTangentAttribute(primitive) {
 }
 
 function usesTexCoord0Attribute(primitive, materialInfo) {
-  var texCoord0Attribute = getVertexAttributeBySemantic(
-    primitive,
+  var texCoord0Attribute = getAttributeBySemantic(
+    primitive.attributes,
     "TEXCOORD_0"
   );
   return defined(texCoord0Attribute) && materialUsesTexCoord0(materialInfo);
 }
 
 function usesTexCoord1Attribute(primitive, materialInfo) {
-  var texCoord1Attribute = getVertexAttributeBySemantic(
-    primitive,
+  var texCoord1Attribute = getAttributeBySemantic(
+    primitive.attributes,
     "TEXCOORD_1"
   );
   return defined(texCoord1Attribute) && materialUsesTexCoord1(materialInfo);
 }
 
 function usesVertexColorAttribute(primitive) {
-  var vertexColorAttribute = getVertexAttributeBySemantic(primitive, "COLOR_0");
+  var vertexColorAttribute = getAttributeBySemantic(
+    primitive.attributes,
+    "COLOR_0"
+  );
   return defined(vertexColorAttribute);
 }
 
-function getGeometryInfo(node, primitive, materialInfo) {
+function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesNormals = usesNormalAttribute(primitive);
   var usesNormalsQuantized = false;
   var usesNormalsOctEncoded = false;
   var usesNormalsOctEncodedZXY = false;
 
   if (usesNormals) {
-    var normalAttribute = getVertexAttributeBySemantic(primitive, "NORMAL");
+    var normalAttribute = getAttributeBySemantic(
+      primitive.attributes,
+      "NORMAL"
+    );
     var normalQuantization = normalAttribute.quantization;
 
     if (defined(normalQuantization)) {
@@ -230,7 +236,10 @@ function getGeometryInfo(node, primitive, materialInfo) {
   var usesTangentsOctEncodedZXY = false;
 
   if (usesTangents) {
-    var tangentAttribute = getVertexAttributeBySemantic(primitive, "TANGENT");
+    var tangentAttribute = getAttributeBySemantic(
+      primitive.attributes,
+      "TANGENT"
+    );
     var tangentQuantization = tangentAttribute.quantization;
 
     if (defined(tangentQuantization)) {
@@ -244,8 +253,8 @@ function getGeometryInfo(node, primitive, materialInfo) {
   var usesTexCoord0Quantized = false;
 
   if (usesTexCoord0) {
-    var texCoord0Attribute = getVertexAttributeBySemantic(
-      primitive,
+    var texCoord0Attribute = getAttributeBySemantic(
+      primitive.attributes,
       "TEXCOORD_0"
     );
     usesTexCoord0Quantized = defined(texCoord0Attribute.quantization);
@@ -255,8 +264,8 @@ function getGeometryInfo(node, primitive, materialInfo) {
   var usesTexCoord1Quantized = false;
 
   if (usesTexCoord1) {
-    var texCoord1Attribute = getVertexAttributeBySemantic(
-      primitive,
+    var texCoord1Attribute = getAttributeBySemantic(
+      primitive.attributes,
       "TEXCOORD_1"
     );
     usesTexCoord1Quantized = defined(texCoord1Attribute.quantization);
@@ -267,8 +276,8 @@ function getGeometryInfo(node, primitive, materialInfo) {
   var usesVertexColorQuantized = false;
 
   if (usesVertexColor) {
-    var vertexColorAttribute = getVertexAttributeBySemantic(
-      primitive,
+    var vertexColorAttribute = getAttributeBySemantic(
+      primitive.attributes,
       "COLOR_0"
     );
     usesVertexColorRGB = vertexColorAttribute.type === AttributeType.VEC3;
@@ -276,57 +285,94 @@ function getGeometryInfo(node, primitive, materialInfo) {
   }
 
   var usesPositions = true;
-  var positionAttribute = getVertexAttributeBySemantic(primitive, "POSITION");
+  var positionAttribute = getAttributeBySemantic(
+    primitive.attributes,
+    "POSITION"
+  );
   var usesPositionsQuantized = defined(positionAttribute.quantized);
 
-  var usesInstancing = defined(node.instances);
-  var usesInstancedFeatureId0 = false;
-  var usesInstancedFeatureId1 = false;
+  var instances = node.instances;
+  var usesInstancing = defined(instances);
   var usesInstancedTranslation = false;
   var usesInstancedRotation = false;
   var usesInstancedScale = false;
-  var usesInstancedMatrix = false;
+  var usesInstancedFeatureId0 = false;
+  var usesInstancedFeatureId1 = false;
+  var usedInstanceAttributesLength = 0;
 
   if (usesInstancing) {
-    usesInstancingFeatureId0 = defined(
-      getInstanceAttributeBySemantic(node.instances, "_FEATURE_ID_0")
+    usesInstancedTranslation = defined(
+      getAttributeBySemantic(instances.attributes, "TRANSLATION")
     );
-    usesInstancingFeatureId1 = defined(
-      getInstanceAttributeBySemantic(node.instances, "_FEATURE_ID_1")
+
+    usesInstancedRotation = defined(
+      getAttributeBySemantic(instances.attributes, "ROTATION")
     );
+
+    usesInstancedScale = defined(
+      getAttributeBySemantic(instances.attributes, "SCALE")
+    );
+
+    usesInstancedFeatureId0 = defined(
+      getAttributeBySemantic(instances.attributes, "_FEATURE_ID_0")
+    );
+
+    usesInstancedFeatureId1 = defined(
+      getAttributeBySemantic(instances.attributes, "_FEATURE_ID_1")
+    );
+
+    if (context.instancedArrays) {
+      if (usesInstancedRotation) {
+        // If the instances have rotations load the attributes as typed arrays
+        // so that instance matrices are computed on the CPU. This avoids the
+        // expensive quaternion -> rotation matrix conversion in the shader.
+        usedInstanceAttributesLength = 3;
+      } else {
+        usedInstanceAttributesLength =
+          usesInstancedTranslation + usesInstancedScale;
+      }
+
+      usedInstanceAttributesLength +=
+        usesInstancedFeatureId0 + usesInstancedFeatureId1;
+    }
   }
 
-  var jointsAttribute = getVertexAttributeBySemantic(primitive, "JOINTS_0");
-  var weightsAttribute = getVertexAttributeBySemantic(primitive, "WEIGHTS_0");
+  var jointsAttribute = getAttributeBySemantic(
+    primitive.attributes,
+    "JOINTS_0"
+  );
+  var weightsAttribute = getAttributeBySemantic(
+    primitive.attributes,
+    "WEIGHTS_0"
+  );
   var usesSkinning =
     defined(node.skin) && defined(jointsAttribute) && defined(weightsAttribute);
   var usesWeightsQuantized =
     usesSkinning && defined(weightsAttribute.quantized);
-  var jointCount = node.skin.joints.length;
+  var jointCount = usesSkinning ? node.skin.joints.length : 0;
 
-  var vertexAttributesInUse =
+  var morphTargets = primitive.morphTargets;
+  var morphTargetsLength = morphTargets.length;
+  var usesMorphTargets = morphTargetsLength > 0;
+
+  for (var i = 0; i < morphTargetsLength; ++i) {
+    var morphTarget = morphTargets[i];
+    var attributes = morphTarget.attributes;
+    var positionAttribute = getAttributeBySemantic(attributes, "POSITION");
+    var normalAttribute = getAttributeBySemantic(attributes, "NORMAL");
+    var tangentAttribute = getAttributeBySemantic(attributes, "TANGENT");
+  }
+
+  // TODO: custom vertex attributes used in a style or custom shader
+
+  var usedVertexAttributesLength =
     usesPositions +
     usesNormals +
     usesTangents +
     usesTexCoord0 +
     usesTexCoord1 +
-    usesVertexColor;
-
-  for (usesInstancing) {
-    var usesPositions
-
-    // TODO: ignore user-defined attributes that aren't used in the shader
-
-    // If instances have translation, rotation, and scale those attributes will
-    // be combined into a mat4 and uploaded to the GPU as three vec4 (skipping
-    // the bottom row). Otherwise each attribute is uploaded to the GPU separately.
-    // In all cases each attribute takes up a single vertex attribute slot.
-    vertexAttributesInUse += node.instances.attributes.length;
-  }
-
-  
-
-  var morphTargets = primitive.morphTargets;
+    usesVertexColor +
+    usedInstanceAttributesLength;
 
   var attributeInfo = new AttributeInfo();
   attributeInfo.usesNormals = usesNormals;
@@ -346,11 +392,35 @@ function getGeometryInfo(node, primitive, materialInfo) {
   attributeInfo.usesVertexColorQuantized = usesVertexColorQuantized;
   attributeInfo.usesPositionsQuantized = usesPositionsQuantized;
   attributeInfo.usesInstancing = usesInstancing;
-  attributeInfo.usesInstancingFeatureId0 = usesInstancingFeatureId0;
-  attributeInfo.usesInstancingFeatureId1 = usesInstancingFeatureId1;
+  attributeInfo.usesInstancedTranslation = usesInstancedTranslation;
+  attributeInfo.usesInstancedRotation = usesInstancedRotation;
+  attributeInfo.usesInstancedScale = usesInstancedScale;
+  attributeInfo.usesInstancedFeatureId0 = usesInstancedFeatureId0;
+  attributeInfo.usesInstancedFeatureId1 = usesInstancedFeatureId1;
+
   attributeInfo.usesSkinning = usesSkinning;
   attributeInfo.usesWeightsQuantized = usesWeightsQuantized;
-  attributeInfo.jointCount = node.jointCount;
+  attributeInfo.jointCount = jointCount;
+
+  attributeInfo.usesMorphTargets = usesMorphTargets;
+  attributeInfo.usesTargetPosition0 = false;
+  attributeInfo.usesTargetPosition1 = false;
+  attributeInfo.usesTargetPosition2 = false;
+  attributeInfo.usesTargetPosition3 = false;
+  attributeInfo.usesTargetPosition4 = false;
+  attributeInfo.usesTargetPosition5 = false;
+  attributeInfo.usesTargetPosition6 = false;
+  attributeInfo.usesTargetPosition7 = false;
+  attributeInfo.usesTargetNormal0 = false;
+  attributeInfo.usesTargetNormal1 = false;
+  attributeInfo.usesTargetNormal2 = false;
+  attributeInfo.usesTargetNormal3 = false;
+  attributeInfo.usesTargetTangent0 = false;
+  attributeInfo.usesTargetTangent1 = false;
+  attributeInfo.usesTargetTangent2 = false;
+  attributeInfo.usesTargetTangent3 = false;
+
+  attributeInfo.usedVertexAttributesLength = usedVertexAttributesLength;
 
   return attributeInfo;
 }
