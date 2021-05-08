@@ -4,14 +4,118 @@ import defined from "../Core/defined.js";
 import Matrix3 from "../Core/Matrix3.js";
 import PrimitiveType from "../Core/PrimitiveType.js";
 import AlphaMode from "./AlphaMode.js";
+import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
+import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
 
+function CustomShaderInfo() {
+  this.usesPositions = false;
+  this.usesNormals = false;
+  this.usesTangents = false;
+  this.usesTexCoord0 = false;
+  this.usesTexCoord1 = false;
+  this.usesVertexColor = false;
+  this.usesFeatureId0 = false;
+  this.usesFeatureId1 = false;
+
+  this.customAttributes = [];
+  // this.featureProperties = [];
+}
+
+function getCustomShaderInfo(primitive) {
+  var customShaderInfo = new CustomShaderInfo();
+  var customShaderSource = primitive.customShaderSource;
+
+  // The Geometry struct contains built-in vertex attributes used by the shader.
+  // The example below shows all supported built-in attributes.
+  //
+  // struct Geometry
+  // {
+  //   vec3 position;
+  //   vec3 normal;
+  //   vec3 tangent;
+  //   vec2 texCoord0;
+  //   vec2 texCoord1;
+  //   vec4 vertexColor;
+  //   uint featureId0;
+  //   uint featureId1;
+  // }
+  var regex = /geometry.(\w+)/g;
+
+  var matches = regex.exec(customShaderSource);
+  while (matches !== null) {
+    var name = matches[1];
+    switch (name) {
+      case "position":
+        customShaderInfo.usesPositions = true;
+        break;
+      case "normal":
+        customShaderInfo.usesNormals = true;
+        break;
+      case "tangent":
+        customShaderInfo.usesTangents = true;
+        break;
+      case "texCoord0":
+        customShaderInfo.usesTexCoord0 = true;
+        break;
+      case "texCoord1":
+        customShaderInfo.usesTexCoord1 = true;
+        break;
+      case "vertexColor":
+        customShaderInfo.usesVertexColor = true;
+        break;
+      case "featureId0":
+        customShaderInfo.usesFeatureId0 = true;
+        break;
+      case "featureId1":
+        customShaderInfo.usesFeatureId1 = true;
+        break;
+    }
+
+    matches = regex.exec(source);
+  }
+
+  // The CustomAttributes struct contains any non-built-in vertex attributes
+  // named by their semantic, e.g.:
+  //
+  // struct CustomAttributes
+  // {
+  //   vec3 _TEMPERATURE;
+  //   float _TIME_CAPTURED;
+  //   vec4 _HSLA_COLOR;
+  // }
+  regex = /customAttributes.(\w+)/g;
+
+  matches = regex.exec(customShaderSource);
+  while (matches !== null) {
+    var name = matches[1];
+    customShaderInfo.customAttributes.push(name);
+    matches = regex.exec(source);
+  }
+
+  return customShaderInfo;
+}
+
 function ModelCommandInfo(node, primitive, context) {
+  var customShaderInfo;
+  var customShader = primitive.customShader;
+
+  if (defined(customShader)) {
+    customShaderInfo = getCustomShaderInfo(primitive, context);
+  }
+
+  var customShaderInfo = getCustomShaderInfo(primitive);
   var materialInfo = getMaterialInfo(primitive, context);
-  var geometryInfo = getGeometryInfo(node, primitive, materialInfo, context);
+  var geometryInfo = getGeometryInfo(
+    node,
+    primitive,
+    materialInfo,
+    customShaderInfo,
+    context
+  );
 
   this.materialInfo = materialInfo;
   this.geometryInfo = geometryInfo;
@@ -235,7 +339,7 @@ function materialUsesTexCoord1(materialInfo) {
   );
 }
 
-function getAttributeBySemantic(attributes, semantic) {
+function getAttribute(attributes, semantic) {
   var attributesLength = attributes.length;
   for (var i = 0; i < attributesLength; ++i) {
     var attribute = attributes[i];
@@ -255,19 +359,25 @@ function usesTexCoord0(texture) {
 }
 
 function usesUnlitShader(primitive) {
-  var normalAttribute = getAttributeBySemantic(primitive.attributes, "NORMAL");
+  var normalAttribute = getAttribute(
+    primitive.attributes,
+    AttributeSemantic.NORMAL
+  );
   return !defined(normalAttribute) || primitive.material.unlit;
 }
 
 function usesNormalAttribute(primitive) {
-  var normalAttribute = getAttributeBySemantic(primitive.attributes, "NORMAL");
+  var normalAttribute = getAttribute(
+    primitive.attributes,
+    AttributeSemantic.NORMAL
+  );
   return defined(normalAttribute) && !usesUnlitShader(primitive);
 }
 
 function usesTangentAttribute(primitive) {
-  var tangentAttribute = getAttributeBySemantic(
+  var tangentAttribute = getAttribute(
     primitive.attributes,
-    "TANGENT"
+    AttributeSemantic.TANGENT
   );
   var usesNormalTexture = defined(primitive.material.normalTexture);
   return (
@@ -278,25 +388,25 @@ function usesTangentAttribute(primitive) {
 }
 
 function usesTexCoord0Attribute(primitive, materialInfo) {
-  var texCoord0Attribute = getAttributeBySemantic(
+  var texCoord0Attribute = getAttribute(
     primitive.attributes,
-    "TEXCOORD_0"
+    AttributeSemantic.TEXCOORD_0
   );
   return defined(texCoord0Attribute) && materialUsesTexCoord0(materialInfo);
 }
 
 function usesTexCoord1Attribute(primitive, materialInfo) {
-  var texCoord1Attribute = getAttributeBySemantic(
+  var texCoord1Attribute = getAttribute(
     primitive.attributes,
-    "TEXCOORD_1"
+    AttributeSemantic.TEXCOORD_1
   );
   return defined(texCoord1Attribute) && materialUsesTexCoord1(materialInfo);
 }
 
 function usesVertexColorAttribute(primitive) {
-  var vertexColorAttribute = getAttributeBySemantic(
+  var vertexColorAttribute = getAttribute(
     primitive.attributes,
-    "COLOR_0"
+    AttributeSemantic.COLOR
   );
   return defined(vertexColorAttribute);
 }
@@ -308,9 +418,9 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesNormalsOctEncodedZXY = false;
 
   if (usesNormals) {
-    var normalAttribute = getAttributeBySemantic(
+    var normalAttribute = getAttribute(
       primitive.attributes,
-      "NORMAL"
+      AttributeSemantic.NORMAL
     );
     var normalQuantization = normalAttribute.quantization;
 
@@ -327,9 +437,9 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesTangentsOctEncodedZXY = false;
 
   if (usesTangents) {
-    var tangentAttribute = getAttributeBySemantic(
+    var tangentAttribute = getAttribute(
       primitive.attributes,
-      "TANGENT"
+      AttributeSemantic.TANGENT
     );
     var tangentQuantization = tangentAttribute.quantization;
 
@@ -344,9 +454,9 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesTexCoord0Quantized = false;
 
   if (usesTexCoord0) {
-    var texCoord0Attribute = getAttributeBySemantic(
+    var texCoord0Attribute = getAttribute(
       primitive.attributes,
-      "TEXCOORD_0"
+      AttributeSemantic.TEXCOORD_0
     );
     usesTexCoord0Quantized = defined(texCoord0Attribute.quantization);
   }
@@ -355,9 +465,9 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesTexCoord1Quantized = false;
 
   if (usesTexCoord1) {
-    var texCoord1Attribute = getAttributeBySemantic(
+    var texCoord1Attribute = getAttribute(
       primitive.attributes,
-      "TEXCOORD_1"
+      AttributeSemantic.TEXCOORD_1
     );
     usesTexCoord1Quantized = defined(texCoord1Attribute.quantization);
   }
@@ -367,18 +477,18 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   var usesVertexColorQuantized = false;
 
   if (usesVertexColor) {
-    var vertexColorAttribute = getAttributeBySemantic(
+    var vertexColorAttribute = getAttribute(
       primitive.attributes,
-      "COLOR_0"
+      AttributeSemantic.COLOR
     );
     usesVertexColorRGB = vertexColorAttribute.type === AttributeType.VEC3;
     usesVertexColorQuantized = defined(vertexColorAttribute.quantization);
   }
 
   var usesPositions = true;
-  var positionAttribute = getAttributeBySemantic(
+  var positionAttribute = getAttribute(
     primitive.attributes,
-    "POSITION"
+    AttributeSemantic.POSITION
   );
   var usesPositionsQuantized = defined(positionAttribute.quantized);
 
@@ -393,23 +503,23 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
 
   if (usesInstancing) {
     usesInstancedTranslation = defined(
-      getAttributeBySemantic(instances.attributes, "TRANSLATION")
+      getAttribute(instances.attributes, InstanceAttributeSemantic.TRANSLATION)
     );
 
     usesInstancedRotation = defined(
-      getAttributeBySemantic(instances.attributes, "ROTATION")
+      getAttribute(instances.attributes, InstanceAttributeSemantic.ROTATION)
     );
 
     usesInstancedScale = defined(
-      getAttributeBySemantic(instances.attributes, "SCALE")
+      getAttribute(instances.attributes, InstanceAttributeSemantic.SCALE)
     );
 
     usesInstancedFeatureId0 = defined(
-      getAttributeBySemantic(instances.attributes, "_FEATURE_ID_0")
+      getAttribute(instances.attributes, InstanceAttributeSemantic.FEATURE_ID_0)
     );
 
     usesInstancedFeatureId1 = defined(
-      getAttributeBySemantic(instances.attributes, "_FEATURE_ID_1")
+      getAttribute(instances.attributes, InstanceAttributeSemantic.FEATURE_ID_1)
     );
 
     if (context.instancedArrays) {
@@ -428,13 +538,13 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
     }
   }
 
-  var jointsAttribute = getAttributeBySemantic(
+  var jointsAttribute = getAttribute(
     primitive.attributes,
-    "JOINTS_0"
+    AttributeSemantic.JOINTS
   );
-  var weightsAttribute = getAttributeBySemantic(
+  var weightsAttribute = getAttribute(
     primitive.attributes,
-    "WEIGHTS_0"
+    AttributeSemantic.WEIGHTS
   );
   var usesSkinning =
     defined(node.skin) && defined(jointsAttribute) && defined(weightsAttribute);
@@ -449,9 +559,18 @@ function getGeometryInfo(node, primitive, materialInfo, context) {
   for (var i = 0; i < morphTargetsLength; ++i) {
     var morphTarget = morphTargets[i];
     var attributes = morphTarget.attributes;
-    var morphPositionAttribute = getAttributeBySemantic(attributes, "POSITION");
-    var morphNormalAttribute = getAttributeBySemantic(attributes, "NORMAL");
-    var morphTangentAttribute = getAttributeBySemantic(attributes, "TANGENT");
+    var morphPositionAttribute = getAttribute(
+      attributes,
+      AttributeSemantic.POSITION
+    );
+    var morphNormalAttribute = getAttribute(
+      attributes,
+      AttributeSemantic.NORMAL
+    );
+    var morphTangentAttribute = getAttribute(
+      attributes,
+      AttributeSemantic.TANGENT
+    );
   }
 
   // TODO: custom vertex attributes used in a style or custom shader

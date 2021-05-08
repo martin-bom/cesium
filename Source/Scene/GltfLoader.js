@@ -18,9 +18,11 @@ import getAccessorByteStride from "../ThirdParty/GltfPipeline/getAccessorByteStr
 import getComponentReader from "../ThirdParty/GltfPipeline/getComponentReader.js";
 import numberOfComponentsForType from "../ThirdParty/GltfPipeline/numberOfComponentsForType.js";
 import when from "../ThirdParty/when.js";
+import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
 import GltfFeatureMetadataLoader from "./GltfFeatureMetadataLoader.js";
 import GltfLoaderUtil from "./GltfLoaderUtil.js";
+import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 import MetadataType from "./MetadataType.js";
 import ModelComponents from "./ModelComponents.js";
 import ResourceCache from "./ResourceCache.js";
@@ -228,6 +230,7 @@ function handleError(gltfLoader, error) {
  */
 GltfLoader.prototype.process = function (frameState) {
   // TODO: clean up this loop
+  // TODO: feature id N support
 
   //>>includeStart('debug', pragmas.debug);
   Check.typeOf.object("frameState", frameState);
@@ -439,10 +442,11 @@ function createAttribute(gltf, accessorId, semantic) {
   return attribute;
 }
 
-function loadVertexAttribute(loader, gltf, accessorId, semantic, draco) {
+function loadVertexAttribute(loader, gltf, accessorId, gltfSemantic, draco) {
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
+  var semantic = AttributeSemantic.fromGltfSemantic(gltfSemantic);
   var attribute = createAttribute(gltf, accessorId, semantic);
 
   if (!defined(draco) && !defined(bufferViewId)) {
@@ -453,7 +457,7 @@ function loadVertexAttribute(loader, gltf, accessorId, semantic, draco) {
     loader,
     gltf,
     accessorId,
-    semantic,
+    gltfSemantic,
     draco
   );
   vertexBufferLoader.promise.then(function (vertexBufferLoader) {
@@ -466,7 +470,7 @@ function loadVertexAttribute(loader, gltf, accessorId, semantic, draco) {
     if (
       defined(draco) &&
       defined(draco.attributes) &&
-      defined(draco.attributes[semantic])
+      defined(draco.attributes[gltfSemantic])
     ) {
       // The accessor's byteOffset and byteStride should be ignored for draco.
       // Each attribute is tightly packed in its own buffer after decode.
@@ -483,13 +487,14 @@ function loadInstancedAttribute(
   loader,
   gltf,
   accessorId,
-  semantic,
+  gltfSemantic,
   loadAsTypedArray,
   frameState
 ) {
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
+  var semantic = InstanceAttributeSemantic.fromGltfSemantic(gltfSemantic);
   var attribute = createAttribute(gltf, accessorId, semantic);
 
   if (!defined(bufferViewId)) {
@@ -503,7 +508,7 @@ function loadInstancedAttribute(
       loader,
       gltf,
       accessorId,
-      semantic,
+      gltfSemantic,
       undefined
     );
     vertexBufferLoader.promise.then(function (vertexBufferLoader) {
@@ -864,7 +869,9 @@ function loadInstances(loader, gltf, instancingExtension, frameState) {
   var instances = new Instances();
   var attributes = instancingExtension.attributes;
   if (defined(attributes)) {
-    var hasRotation = defined(getAttributeBySemantic(attributes, "ROTATION"));
+    var hasRotation = defined(
+      getAttributeBySemantic(attributes, InstanceAttributeSemantic.ROTATION)
+    );
     for (var semantic in attributes) {
       if (attributes.hasOwnProperty(semantic)) {
         // If the instances have rotations load the attributes as typed arrays
@@ -872,9 +879,9 @@ function loadInstances(loader, gltf, instancingExtension, frameState) {
         // expensive quaternion -> rotation matrix conversion in the shader.
         var loadAsTypedArray =
           hasRotation &&
-          (semantic === "TRANSLATION" ||
-            semantic === "ROTATION" ||
-            semantic === "SCALE");
+          (semantic === InstanceAttributeSemantic.TRANSLATION ||
+            semantic === InstanceAttributeSemantic.ROTATION ||
+            semantic === InstanceAttributeSemantic.SCALE);
 
         var accessorId = attributes[semantic];
         instances.attributes.push(
@@ -1185,92 +1192,6 @@ var attributeTypes = [
   AttributeType.VEC3,
   AttributeType.VEC4,
 ];
-
-function finalize(loader, frameState) {
-  // Convert per-vertex metadata to vertex buffers. Mainly applicable to point clouds.
-  var components = loader._components;
-  var featureMetadata = components.featureMetadata;
-  var nodes = components.nodes;
-  var nodesLength = nodes.length;
-  for (var i = 0; i < nodesLength; ++i) {
-    var node = nodes[i];
-    var primitives = node.primitives;
-    var primitivesLength = primitives.length;
-    for (var j = 0; j < primitivesLength; ++j) {
-      var primitive = primitives[j];
-      var attributes = primitive.attributes;
-      if (attributes.length === 0) {
-        continue;
-      }
-      var vertexCount = attributes[0].count;
-      var featureIdAttributes = primitive.featureIdAttributes;
-      var featureIdAttributesLength = featureIdAttributes.length;
-      for (var k = 0; k < featureIdAttributesLength; ++k) {
-        var featureIdAttribute = featureIdAttributes[k];
-        var featureTableId = featureIdAttribute.featureTable;
-        var featureTable = featureMetadata.getFeatureTable(featureTableId);
-        var featureTableClass = featureTable.class;
-        var semantic = featureIdAttribute.semantic;
-        var divisor = featureIdAttribute.divisor;
-        var constant = featureIdAttribute.constant;
-        if (defined(semantic) || divisor !== 1) {
-          continue;
-        }
-        var propertyIds = featureTable.getPropertyIds(0);
-        var propertyIdsLength = propertyIds.length;
-        for (var l = 0; l < propertyIdsLength; ++l) {
-          var propertyId = propertyIds[l];
-          var typedArray = featureTable.getPropertyTypedArray(propertyId);
-          if (!defined(typedArray)) {
-            continue;
-          }
-          var property = featureTableClass.properties[propertyId];
-          if (invalidVertexAttributeProperty(property)) {
-            continue;
-          }
-          var componentCount = property.componentCount; // TODO: check if defined for scalars
-          var startOffset = constant * componentCount;
-          var endOffset = startOffset + vertexCount * componentCount;
-          typedArray = typedArray.subarray(startOffset, endOffset);
-          if (lossyVertexAttributeProperty(property)) {
-            oneTimeWarning(
-              "Cast metadata property to floats",
-              'Feature table property "' +
-                propertyId +
-                '" will be casted to a float array because UINT32, UINT64, INT32, INT64, and FLOAT64 are not valid WebGL vertex attribute types. Some precision may be lost.'
-            );
-            typedArray = new Float32Array(typedArray);
-          }
-
-          // TODO: integrate into JobScheduler, or don't bother?
-          var vertexBuffer = Buffer.createVertexBuffer({
-            typedArray: typedArray,
-            context: frameState.context,
-            usage: BufferUsage.STATIC_DRAW,
-          });
-          vertexBuffer.vertexArrayDestroyable = false;
-
-          var metadataAttribute = new Attribute();
-          metadataAttribute.semantic = propertyId;
-          metadataAttribute.constant = undefined;
-          metadataAttribute.componentDatatype = ComponentDatatype.fromTypedArray(
-            typedArray
-          );
-          metadataAttribute.normalized = property.normalized;
-          metadataAttribute.count = vertexCount;
-          metadataAttribute.type = attributeTypes[componentCount];
-          metadataAttribute.min = undefined;
-          metadataAttribute.max = undefined;
-          metadataAttribute.byteOffset = 0;
-          metadataAttribute.byteStride = undefined;
-          metadataAttribute.buffer = vertexBuffer;
-
-          primitives.attributes.push(metadataAttribute);
-        }
-      }
-    }
-  }
-}
 
 function unloadTextures(loader) {
   var textureLoaders = loader._textureLoaders;

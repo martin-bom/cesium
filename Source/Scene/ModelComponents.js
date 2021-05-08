@@ -88,22 +88,12 @@ function Quantization() {
  */
 function Attribute() {
   /**
-   * The attribute semantic. The following semantics have defined behavior:
-   * <ul>
-   *   <li>POSITION: per-vertex position</li>
-   *   <li>NORMAL: per-vertex normal</li>
-   *   <li>TANGENT: per-vertex tangent</li>
-   *   <li>TEXCOORD_0: per-vertex texture coordinates (first set)</li>
-   *   <li>TEXCOORD_1: per-vertex texture coordinates (second set)</li>
-   *   <li>COLOR_0: per-vertex colors</li>
-   *   <li>JOINTS_0: per-vertex joint IDs for skinning</li>
-   *   <li>WEIGHTS_0: per-vertex joint weights for skinning</li>
-   *   <li>_FEATURE_ID_0: per-vertex or per-instance feature IDs (first set)</li>
-   *   <li>_FEATURE_ID_1: per-vertex or per-instance feature IDs (second set)</li>
-   *   <li>TRANSLATION: per-instance translation</li>
-   *   <li>ROTATION: per-instance rotation</li>
-   *   <li>SCALE: per-instance scale</li>
-   * </ul>
+   * The attribute semantic. May be a built-in semantic in {@link AttributeSemantic}
+   * or {@link InstanceAttributeSemantic}, or may be a user-defined semantic.
+   * <p>
+   * User-defined semantics (such as semantics that start with an
+   * underscore in glTF) must be ASCII and match the regex [a-zA-Z_][a-zA-Z0-9]*
+   * </p>
    *
    * @type {String}
    * @private
@@ -284,7 +274,7 @@ function FeatureIdAttribute() {
   this.featureTableId = undefined;
 
   /**
-   * The semantic of the attribute containing feature IDs, e.g. "_FEATURE_ID_0".
+   * The semantic of the attribute containing feature IDs.
    *
    * @type {String}
    * @private
@@ -402,6 +392,16 @@ function Primitive() {
    * @private
    */
   this.material = undefined;
+
+  /**
+   * TODO: what about if this is eventually a custom vertex shader... does this belong in the material?
+   * 
+   * The custom shader.
+   *
+   * @type {String}
+   * @private
+   */
+  this.customShader = undefined;
 
   /**
    * The primitive type, e.g. PrimitiveType.TRIANGLES.
