@@ -11,6 +11,23 @@ import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
 
+var StyleEvaluation = {
+  EVALUATE_CPU_APPLY_GPU_VERT: 0,
+  EVALUATE_CPU_APPLY_GPU_FRAG: 1,
+  EVALUATE_GPU_APPLY_GPU_VERT: 2,
+  EVALUATE_GPU_APPLY_GPU_FRAG: 3,
+  NONE: 4,
+};
+
+function getStyleEvaluation(style) {
+  // If 
+
+  this.useFragmentShading = primitive.primitiveType !== PrimitiveType.POINTS;
+
+
+//  var styleShader = 
+}
+
 function CustomShaderInfo() {
   this.usesPositions = false;
   this.usesNormals = false;
@@ -29,8 +46,7 @@ function getCustomShaderInfo(primitive) {
   var customShaderInfo = new CustomShaderInfo();
   var customShaderSource = primitive.customShaderSource;
 
-  // The Geometry struct contains built-in vertex attributes used by the shader.
-  // The example below shows all supported built-in attributes.
+  // The Geometry struct contains built-in vertex attributes, e.g.:
   //
   // struct Geometry
   // {
@@ -78,7 +94,94 @@ function getCustomShaderInfo(primitive) {
     matches = regex.exec(source);
   }
 
-  // The CustomAttributes struct contains any non-built-in vertex attributes
+  // The CustomAttributes struct contains non-built-in vertex attributes
+  // named by their semantic, e.g.:
+  //
+  // struct CustomAttributes
+  // {
+  //   vec3 _TEMPERATURE;
+  //   float _TIME_CAPTURED;
+  //   vec4 _HSLA_COLOR;
+  // }
+  regex = /customAttributes.(\w+)/g;
+
+  matches = regex.exec(customShaderSource);
+  while (matches !== null) {
+    var name = matches[1];
+    customShaderInfo.customAttributes.push(name);
+    matches = regex.exec(source);
+  }
+
+  return customShaderInfo;
+}
+
+function StyleInfo() {
+  this.usesPositions = false;
+  this.usesNormals = false;
+  this.usesTangents = false;
+  this.usesTexCoord0 = false;
+  this.usesTexCoord1 = false;
+  this.usesVertexColor = false;
+  this.usesFeatureId0 = false;
+  this.usesFeatureId1 = false;
+
+  this.customAttributes = [];
+  this.featureProperties = [];
+}
+
+function getCustomShaderInfo(primitive) {
+  var customShaderInfo = new CustomShaderInfo();
+  var customShaderSource = primitive.customShaderSource;
+
+  // The Geometry struct contains built-in vertex attributes, e.g.:
+  //
+  // struct Geometry
+  // {
+  //   vec3 position;
+  //   vec3 normal;
+  //   vec3 tangent;
+  //   vec2 texCoord0;
+  //   vec2 texCoord1;
+  //   vec4 vertexColor;
+  //   uint featureId0;
+  //   uint featureId1;
+  // }
+  var regex = /geometry.(\w+)/g;
+
+  var matches = regex.exec(customShaderSource);
+  while (matches !== null) {
+    var name = matches[1];
+    switch (name) {
+      case "position":
+        customShaderInfo.usesPositions = true;
+        break;
+      case "normal":
+        customShaderInfo.usesNormals = true;
+        break;
+      case "tangent":
+        customShaderInfo.usesTangents = true;
+        break;
+      case "texCoord0":
+        customShaderInfo.usesTexCoord0 = true;
+        break;
+      case "texCoord1":
+        customShaderInfo.usesTexCoord1 = true;
+        break;
+      case "vertexColor":
+        customShaderInfo.usesVertexColor = true;
+        break;
+      case "featureId0":
+        customShaderInfo.usesFeatureId0 = true;
+        break;
+      case "featureId1":
+        customShaderInfo.usesFeatureId1 = true;
+        break;
+    }
+
+    matches = regex.exec(source);
+  }
+
+  // The CustomAttributes struct contains non-built-in vertex attributes
   // named by their semantic, e.g.:
   //
   // struct CustomAttributes
@@ -119,7 +222,7 @@ function ModelCommandInfo(node, primitive, context) {
 
   this.materialInfo = materialInfo;
   this.geometryInfo = geometryInfo;
-  this.useFragmentShading = primitive.primitiveType === PrimitiveType.POINTS;
+  this.useFragmentShading = primitive.primitiveType !== PrimitiveType.POINTS;
 }
 
 ModelCommandInfo.prototype.getShaderKey = function () {
@@ -366,41 +469,81 @@ function usesUnlitShader(primitive) {
   return !defined(normalAttribute) || primitive.material.unlit;
 }
 
-function usesNormalAttribute(primitive) {
+function usesNormalAttribute(primitive, customShaderInfo) {
   var normalAttribute = getAttribute(
     primitive.attributes,
     AttributeSemantic.NORMAL
   );
-  return defined(normalAttribute) && !usesUnlitShader(primitive);
+
+  if (!defined(normalAttribute)) {
+    return false;
+  }
+
+  if (defined(customShaderInfo)) {
+    return customShaderInfo.usesNormals;
+  }
+
+  return !usesUnlitShader(primitive);
 }
 
-function usesTangentAttribute(primitive) {
+function usesTangentAttribute(primitive, customShaderInfo) {
+  var normalAttribute = getAttribute(
+    primitive.attributes,
+    AttributeSemantic.NORMAL
+  );
+
   var tangentAttribute = getAttribute(
     primitive.attributes,
     AttributeSemantic.TANGENT
   );
-  var usesNormalTexture = defined(primitive.material.normalTexture);
+
+  if (!defined(tangentAttribute)) {
+    return false;
+  }
+
+  if (defined(customShaderInfo)) {
+    return customShaderInfo.usesTangents;
+  }
+
   return (
-    defined(tangentAttribute) &&
-    usesNormalAttribute(primitive) &&
-    usesNormalTexture
+    !usesUnlitShader(primitive) &&
+    defined(primitive.material.normalTexture) &&
+    defined(normalAttribute)
   );
 }
 
-function usesTexCoord0Attribute(primitive, materialInfo) {
+function usesTexCoord0Attribute(primitive, materialInfo, customShaderInfo) {
   var texCoord0Attribute = getAttribute(
     primitive.attributes,
     AttributeSemantic.TEXCOORD_0
   );
-  return defined(texCoord0Attribute) && materialUsesTexCoord0(materialInfo);
+
+  if (!defined(texCoord0Attribute)) {
+    return false;
+  }
+
+  if (defined(customShaderInfo)) {
+    return customShaderInfo.usesTexCoord0;
+  }
+
+  return materialUsesTexCoord0(materialInfo);
 }
 
-function usesTexCoord1Attribute(primitive, materialInfo) {
+function usesTexCoord1Attribute(primitive, materialInfo, customShaderInfo) {
   var texCoord1Attribute = getAttribute(
     primitive.attributes,
     AttributeSemantic.TEXCOORD_1
   );
-  return defined(texCoord1Attribute) && materialUsesTexCoord1(materialInfo);
+
+  if (!defined(texCoord1Attribute)) {
+    return false;
+  }
+
+  if (defined(customShaderInfo)) {
+    return customShaderInfo.usesTexCoord1;
+  }
+
+  return materialUsesTexCoord1(materialInfo);
 }
 
 function usesVertexColorAttribute(primitive) {
@@ -408,10 +551,25 @@ function usesVertexColorAttribute(primitive) {
     primitive.attributes,
     AttributeSemantic.COLOR
   );
-  return defined(vertexColorAttribute);
+
+  if (!defined(vertexColorAttribute)) {
+    return false;
+  }
+
+  if (defined(customShaderInfo)) {
+    return customShaderInfo.usesVertexColor;
+  }
+
+  return true;
 }
 
-function getGeometryInfo(node, primitive, materialInfo, context) {
+function getGeometryInfo(
+  node,
+  primitive,
+  materialInfo,
+  customShaderInfo,
+  context
+) {
   var usesNormals = usesNormalAttribute(primitive);
   var usesNormalsQuantized = false;
   var usesNormalsOctEncoded = false;
