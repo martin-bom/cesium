@@ -197,4 +197,26 @@ ConditionsExpression.prototype.getShaderFunction = function (
 
   return shaderFunction;
 };
+
+/**
+ * Gets the variables used by the expression.
+ *
+ * @param {StyleVariables} styleVariables The variables used by the style.
+ *
+ * @private
+ */
+ConditionsExpression.prototype.getVariables = function (styleVariables) {
+  var conditions = this._runtimeConditions;
+  if (!defined(conditions) || conditions.length === 0) {
+    return undefined;
+  }
+
+  var length = conditions.length;
+  for (var i = 0; i < length; ++i) {
+    var statement = conditions[i];
+    statement.condition.getVariables(styleVariables);
+    statement.expression.getVariables(styleVariables);
+  }
+};
+
 export default ConditionsExpression;

@@ -71,4 +71,16 @@ StyleExpression.prototype.getShaderFunction = function (
 ) {
   DeveloperError.throwInstantiationError();
 };
+
+/**
+ * Gets the variables used by the expression.
+ *
+ * @returns {StyleVariables} The variables used by the expression.
+ *
+ * @private
+ */
+StyleExpression.prototype.getVariables = function () {
+  DeveloperError.throwInstantiationError();
+};
+
 export default StyleExpression;

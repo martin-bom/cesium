@@ -1,4 +1,4 @@
-import Cartesian2 from "../Core/Cartsian2.js";
+import Cartesian2 from "../Core/Cartesian2.js";
 import Check from "../Core/Check.js";
 import defaultValue from "../Core/defaultValue.js";
 import defined from "../Core/defined.js";

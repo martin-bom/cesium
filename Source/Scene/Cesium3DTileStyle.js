@@ -1657,14 +1657,15 @@ Cesium3DTileStyle.prototype.getColorShaderFunction = function (
   }
 
   this._colorShaderFunctionReady = true;
-  this._colorShaderFunction = defined(this.color)
-    ? this.color.getShaderFunction(
-        functionName,
-        propertyNameMap,
-        shaderState,
-        "vec4"
-      )
-    : undefined;
+  this._colorShaderFunction =
+    defined(this.color) && defined(this.color.getShaderFunction)
+      ? this.color.getShaderFunction(
+          functionName,
+          propertyNameMap,
+          shaderState,
+          "vec4"
+        )
+      : undefined;
   this._colorShaderTranslucent = shaderState.translucent;
   return this._colorShaderFunction;
 };
@@ -1691,14 +1692,15 @@ Cesium3DTileStyle.prototype.getShowShaderFunction = function (
   }
 
   this._showShaderFunctionReady = true;
-  this._showShaderFunction = defined(this.show)
-    ? this.show.getShaderFunction(
-        functionName,
-        propertyNameMap,
-        shaderState,
-        "bool"
-      )
-    : undefined;
+  this._showShaderFunction =
+    defined(this.show) && defined(this.show.getShaderFunction)
+      ? this.show.getShaderFunction(
+          functionName,
+          propertyNameMap,
+          shaderState,
+          "bool"
+        )
+      : undefined;
   return this._showShaderFunction;
 };
 
@@ -1724,14 +1726,53 @@ Cesium3DTileStyle.prototype.getPointSizeShaderFunction = function (
   }
 
   this._pointSizeShaderFunctionReady = true;
-  this._pointSizeShaderFunction = defined(this.pointSize)
-    ? this.pointSize.getShaderFunction(
-        functionName,
-        propertyNameMap,
-        shaderState,
-        "float"
-      )
-    : undefined;
+  this._pointSizeShaderFunction =
+    defined(this.pointSize) && defined(this.pointSize.getShaderFunction)
+      ? this.pointSize.getShaderFunction(
+          functionName,
+          propertyNameMap,
+          shaderState,
+          "float"
+        )
+      : undefined;
   return this._pointSizeShaderFunction;
 };
+
+/**
+ * Variables used by the expression.
+ *
+ * @typedef {Object} StyleVariables
+ * @property {String[]} variables An array of variables.
+ * @property {String[]} builtInVariables An array of built-in variables.
+ * @private
+ */
+
+/**
+ * Gets the variables used by the style.
+ *
+ * @returns {StyleVariables} The variables used by the style.
+ *
+ * @private
+ */
+Cesium3DTileStyle.prototype.getVariables = function () {
+  var styleVariables = {
+    variables: [],
+    builtInVariables: [],
+  };
+
+  if (defined(this.color) && defined(this.color.getVariables)) {
+    return this.color.getVariables(styleVariables);
+  }
+
+  if (defined(this.show) && defined(this.show.getVariables)) {
+    return this.show.getVariables(styleVariables);
+  }
+
+  if (defined(this.pointSize) && defined(this.pointSize.getVariables)) {
+    return this.pointSize.getVariables(styleVariables);
+  }
+
+  return styleVariables;
+};
+
 export default Cesium3DTileStyle;

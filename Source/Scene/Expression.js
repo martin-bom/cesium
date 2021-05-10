@@ -219,6 +219,15 @@ Expression.prototype.getShaderExpression = function (
   return this._runtimeAst.getShaderExpression(propertyNameMap, shaderState);
 };
 
+/**
+ * Gets the variables used by the expression.
+ *
+ * @private
+ */
+Expression.prototype.getVariables = function (styleVariables) {
+  this._runtimeAst.getVariables(styleVariables);
+};
+
 var unaryOperators = ["!", "-", "+"];
 var binaryOperators = [
   "+",
@@ -2277,4 +2286,83 @@ Node.prototype.getShaderExpression = function (
       }
   }
 };
+
+function addVariable(variableName, variablesNames) {
+  if (variablesNames.indexOf(variableName) === -1) {
+    variablesNames.push(variableName);
+  }
+}
+
+function addVariablesInString(string, variableNames) {
+  var match = variableRegex.exec(string);
+  while (match !== null) {
+    addVariable(match[1], variableNames);
+    match = variableRegex.exec(string);
+  }
+}
+
+Node.prototype.getVariables = function (styleVariables, parent) {
+  var array;
+  var length;
+  var i;
+
+  var type = this._type;
+  var value = this._value;
+
+  if (defined(this._left)) {
+    if (Array.isArray(this._left)) {
+      // Left can be an array if the type is LITERAL_COLOR or LITERAL_VECTOR
+      array = this._left;
+      length = array.length;
+      for (i = 0; i < length; ++i) {
+        array[i].getVariables(styleVariables, this);
+      }
+    } else {
+      this._left.getVariables(styleVariables, this);
+    }
+  }
+
+  if (defined(this._right)) {
+    this._right.getVariables(styleVariables, this);
+  }
+
+  if (defined(this._test)) {
+    this._test.getVariables(styleVariables, this);
+  }
+
+  if (Array.isArray(this._value)) {
+    // For ARRAY type
+    array = this._value;
+    length = array.length;
+    for (i = 0; i < length; ++i) {
+      array[i].getVariables(styleVariables, this);
+    }
+  }
+
+  switch (type) {
+    case ExpressionNodeType.VARIABLE:
+      if (!checkFeature(this)) {
+        addVariable(value, styleVariables.variables);
+      }
+      break;
+    case ExpressionNodeType.VARIABLE_IN_STRING:
+      addVariablesInString(value, styleVariables.variables);
+      break;
+    case ExpressionNodeType.LITERAL_STRING:
+      if (
+        defined(parent) &&
+        parent._type === ExpressionNodeType.MEMBER &&
+        checkFeature(parent._left)
+      ) {
+        addVariable(value, styleVariables.variables);
+      }
+      break;
+    case ExpressionNodeType.BUILTIN_VARIABLE:
+      if (value === "tiles3d_tileset_time") {
+        addVariable(value, styleVariables.builtInVariables);
+      }
+      break;
+  }
+};
+
 export default Expression;

@@ -19,13 +19,83 @@ var StyleEvaluation = {
   NONE: 4,
 };
 
-function getStyleEvaluation(style) {
-  // If 
+function getFeaturePropertiesUsedByStyle(style) {}
+
+function getMetadataClassProperty(primitive, featureMetadata, styleVariables) {
+  var featureIdAttributes = primitive.featureIdAttributes;
+  var featureIdAttributesLength = featureIdAttributes.length;
+
+  var variablesLength = styleVariables.variables.length;
+  for (var i = 0; i < variablesLength; ++i) {
+    var propertyId = styleVariables.variables[i];
+    for (var j = 0; i < featureIdAttributesLength; ++j) {
+      var featureIdAttribute = featureIdAttributes[j];
+      var featureTableId = featureIdAttribute.featureTableId;
+      var featureTable = featureMetadata.getFeatureTable(featureTableId);
+      if (defined(featureTable.class)) {
+        var classProperties = featureTable.class.properties;
+        if (defined(classProperties[propertyId]))
+      }
+    }
+  }
+}
+
+function getStyleEvaluation(primitive, featureMetadata, style) {
+  var featureIdAttributes = primitive.featureIdAttributes;
+  var featureIdAttributesLength = featureIdAttributes.length;
+
+  // Get all the property IDs
+  var styleVariables = style.getVariables();
+  var variables = styleVariables.variables;
+  var builtInVariables = styleVariables.builtInVariables;
+
+  // Check if any variables refer to JSON property or hierarchy properties.
+  // If so CPU shading must be used.
+
+  var propertyIdMap = {};
+
+  // What to do about default values
+
+  // CPU
+  //     strings, regex, etc
+  //     incompatible properties: string, var-sized arrays, array > 4
+  //     batch table hierarchy
+  //     custom evaluate functions
+  //     what about that meta property?
+
+  // EVALUATE_CPU_APPLY_GPU_FRAG
+  //     feature id textures
+  //     no vertex-texture-fetch
+
+  // EVALUATE_CPU_APPLY_GPU_VERT
+  //     everything else
+
+  // GPU
+  //     any situation where Cesium3DTileFeature objects aren't created
+  //       per-point properties
+  //       per-vertex properties (stride 1 basically where vertex interpolation is needed)
+  //     tileset_3dtile_time (but if needs to use the GPU just ignore this)
+  //     feature textures
+  //     uses vertex attributes (position, color, etc)
+  //     styling point size
+  //     multiple feature tables (I think)
+
+  // EVALUATE_GPU_APPLY_GPU_FRAG
+  //     per-vertex properties (stride 1 basically where vertex interpolation is needed)
+  //     feature textures
+  //     using interpolated vertex attributes (position, normal, etc) - non point clouds
+
+  // EVALUATE_GPU_APPLY_GPU_VERT
+  //     everything else
+
+  // always favor CPU
+
+  // NONE
+  //     any case where the two above are the same
 
   this.useFragmentShading = primitive.primitiveType !== PrimitiveType.POINTS;
 
-
-//  var styleShader = 
+  //  var styleShader =
 }
 
 function CustomShaderInfo() {
@@ -127,79 +197,6 @@ function StyleInfo() {
 
   this.customAttributes = [];
   this.featureProperties = [];
-}
-
-function getCustomShaderInfo(primitive) {
-  var customShaderInfo = new CustomShaderInfo();
-  var customShaderSource = primitive.customShaderSource;
-
-  // The Geometry struct contains built-in vertex attributes, e.g.:
-  //
-  // struct Geometry
-  // {
-  //   vec3 position;
-  //   vec3 normal;
-  //   vec3 tangent;
-  //   vec2 texCoord0;
-  //   vec2 texCoord1;
-  //   vec4 vertexColor;
-  //   uint featureId0;
-  //   uint featureId1;
-  // }
-  var regex = /geometry.(\w+)/g;
-
-  var matches = regex.exec(customShaderSource);
-  while (matches !== null) {
-    var name = matches[1];
-    switch (name) {
-      case "position":
-        customShaderInfo.usesPositions = true;
-        break;
-      case "normal":
-        customShaderInfo.usesNormals = true;
-        break;
-      case "tangent":
-        customShaderInfo.usesTangents = true;
-        break;
-      case "texCoord0":
-        customShaderInfo.usesTexCoord0 = true;
-        break;
-      case "texCoord1":
-        customShaderInfo.usesTexCoord1 = true;
-        break;
-      case "vertexColor":
-        customShaderInfo.usesVertexColor = true;
-        break;
-      case "featureId0":
-        customShaderInfo.usesFeatureId0 = true;
-        break;
-      case "featureId1":
-        customShaderInfo.usesFeatureId1 = true;
-        break;
-    }
-
-    matches = regex.exec(source);
-  }
-
-  // The CustomAttributes struct contains non-built-in vertex attributes
-  // named by their semantic, e.g.:
-  //
-  // struct CustomAttributes
-  // {
-  //   vec3 _TEMPERATURE;
-  //   float _TIME_CAPTURED;
-  //   vec4 _HSLA_COLOR;
-  // }
-  regex = /customAttributes.(\w+)/g;
-
-  matches = regex.exec(customShaderSource);
-  while (matches !== null) {
-    var name = matches[1];
-    customShaderInfo.customAttributes.push(name);
-    matches = regex.exec(source);
-  }
-
-  return customShaderInfo;
 }
 
 function ModelCommandInfo(node, primitive, context) {
@@ -948,3 +945,5 @@ function getMaterialInfo(primitive, context) {
 
   return materialInfo;
 }
+
+export default ModelCommandInfo;
