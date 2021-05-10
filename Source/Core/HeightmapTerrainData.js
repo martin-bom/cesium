@@ -238,6 +238,7 @@ HeightmapTerrainData.prototype.createMesh = function (options) {
     this._width,
     tilingScheme.getNumberOfXTilesAtLevel(0)
   );
+  console.log(levelZeroMaxError);
   var thisLevelMaxError = levelZeroMaxError / (1 << level);
   this._skirtHeight = Math.min(thisLevelMaxError * 4.0, 1000.0);
 

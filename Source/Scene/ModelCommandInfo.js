@@ -7,6 +7,7 @@ import AlphaMode from "./AlphaMode.js";
 import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
 import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
+import MetadataType from "./MetadataType.js";
 
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
@@ -21,23 +22,62 @@ var StyleEvaluation = {
 
 function getFeaturePropertiesUsedByStyle(style) {}
 
-function getMetadataClassProperty(primitive, featureMetadata, styleVariables) {
+var PropertyType = {
+  GPU: 0,
+  CPU: 1,
+};
+
+function isPropertyGpuCompatible(property) {
+  // Variable-size arrays or arrays with more than 4 components are not supported
+  // Strings or arrays of strings are not supported
+  var type = property.type;
+  var valueType = property.valueType;
+  var componentCount = property.componentCount;
+
+  if (
+    type === MetadataType.ARRAY &&
+    (!defined(componentCount) || componentCount > 4)
+  ) {
+    return false;
+  }
+
+  if (valueType === MetadataType.STRING) {
+    return false;
+  }
+
+  return true;
+}
+
+function getPropertyType(primitive, featureMetadata, propertyId) {
   var featureIdAttributes = primitive.featureIdAttributes;
   var featureIdAttributesLength = featureIdAttributes.length;
 
-  var variablesLength = styleVariables.variables.length;
-  for (var i = 0; i < variablesLength; ++i) {
-    var propertyId = styleVariables.variables[i];
-    for (var j = 0; i < featureIdAttributesLength; ++j) {
-      var featureIdAttribute = featureIdAttributes[j];
-      var featureTableId = featureIdAttribute.featureTableId;
-      var featureTable = featureMetadata.getFeatureTable(featureTableId);
-      if (defined(featureTable.class)) {
-        var classProperties = featureTable.class.properties;
-        if (defined(classProperties[propertyId]))
-      }
+  for (var i = 0; i < featureIdAttributesLength; ++i) {
+    var featureIdAttribute = featureIdAttributes[i];
+    var featureTableId = featureIdAttribute.featureTableId;
+    var featureTable = featureMetadata.getFeatureTable(featureTableId);
+    if (featureTable.hasProperty(0, propertyId)) {
+      // TODO: need a better way to check if the property exists when using batch table hierarchy
+      return PropertyType.JSON;
     }
+
+    // if (defined(featureTable.class)) {
+    //   var classProperties = featureTable.class.properties
+    //   var property = classProperties[propertyId];
+    //   if (defined(classProperty)) {
+    //     if (isPropertyGpuCompatible(classProperty)) {
+
+    //     }
+    //     var type = classProperty.type;
+    //     var componentType =
+    //     if (type === MetadataType.ARRAY &&
+
+    //     return PropertyType.BINARY;
+    //   }
+    // }
   }
+
+  return undefined;
 }
 
 function getStyleEvaluation(primitive, featureMetadata, style) {
@@ -48,6 +88,12 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
   var styleVariables = style.getVariables();
   var variables = styleVariables.variables;
   var builtInVariables = styleVariables.builtInVariables;
+
+  var variablesLength = styleVariables.variables.length;
+  for (var i = 0; i < variablesLength; ++i) {
+    var propertyId = styleVariables.variables[i];
+    var propertyType = getPropertyType(primitive, featureMetadata, propertyId);
+  }
 
   // Check if any variables refer to JSON property or hierarchy properties.
   // If so CPU shading must be used.
