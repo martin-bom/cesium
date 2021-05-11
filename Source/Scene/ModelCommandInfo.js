@@ -21,19 +21,31 @@ var StyleEvaluation = {
   NONE: 4,
 };
 
-function getFeaturePropertiesUsedByStyle(style) {}
+function getFeatureTableContainingProperty(
+  primitive,
+  featureMetadata,
+  propertyId
+) {
+  var featureIdAttributes = primitive.featureIdAttributes;
+  var featureIdAttributesLength = featureIdAttributes.length;
 
-var PropertyType = {
-  GPU: 0,
-  CPU: 1,
-};
+  for (var i = 0; i < featureIdAttributesLength; ++i) {
+    var featureIdAttribute = featureIdAttributes[i];
+    var featureTableId = featureIdAttribute.featureTableId;
+    var featureTable = featureMetadata.getFeatureTable(featureTableId);
+    if (featureTable.hasProperty(0, propertyId)) {
+      // TODO: need a better way to check if the property exists in the batch table hierarchy
+      return featureTable;
+    }
+  }
+}
 
-function isPropertyGpuCompatible(property) {
+function isClassPropertyGpuCompatible(classProperty) {
   // Variable-size arrays or arrays with more than 4 components are not supported
   // Strings or arrays of strings are not supported
-  var type = property.type;
-  var valueType = property.valueType;
-  var componentCount = property.componentCount;
+  var type = classProperty.type;
+  var valueType = classProperty.valueType;
+  var componentCount = classProperty.componentCount;
 
   if (
     type === MetadataType.ARRAY &&
@@ -49,57 +61,134 @@ function isPropertyGpuCompatible(property) {
   return true;
 }
 
-function getPropertyType(primitive, featureMetadata, propertyId) {
-  var featureIdAttributes = primitive.featureIdAttributes;
-  var featureIdAttributesLength = featureIdAttributes.length;
+function isPropertyGpuCompatible(primitive, featureMetadata, propertyId) {
+  var featureTable = getFeatureTableContainingProperty(
+    primitive,
+    featureMetadata,
+    propertyId
+  );
 
-  for (var i = 0; i < featureIdAttributesLength; ++i) {
-    var featureIdAttribute = featureIdAttributes[i];
-    var featureTableId = featureIdAttribute.featureTableId;
-    var featureTable = featureMetadata.getFeatureTable(featureTableId);
-    if (featureTable.hasProperty(0, propertyId)) {
-      // TODO: need a better way to check if the property exists in the batch table hierarchy
-      if (defined(featureTable.class)) {
-        var classProperties = featureTable.class.properties;
-        var classProperty = classProperties[propertyId];
-        if (defined(classProperty)) {
-          if (isPropertyGpuCompatible(classProperty)) {
-            return PropertyType.GPU;
-          }
-        }
-      }
-      return PropertyType.CPU;
+  if (defined(featureTable.class)) {
+    var classProperties = featureTable.class.properties;
+    var classProperty = classProperties[propertyId];
+    if (defined(classProperty)) {
+      return isClassPropertyGpuCompatible(classProperty);
     }
   }
 
-  return undefined;
+  return false;
+}
+
+function hasPropertyId(primitive, featureMetadata, variable) {
+  if (!defined(featureMetadata)) {
+    return false;
+  }
+
+  var featureTable = getFeatureTableContainingProperty(
+    primitive,
+    featureMetadata,
+    variable
+  );
+
+  if (defined(featureTable)) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasAttributeSemantic(primitive, variable) {
+  if (variable === "POSITION_ABSOLUTE") {
+    // POSITION_ABSOLUTE is not technically an attribute but it needs to be
+    // supported for backwards compatibility with pnts styling.
+    // See https://github.com/CesiumGS/3d-tiles/tree/master/specification/Styling#point-cloud
+    return true;
+  }
+
+  // Get the attribute semantic matching the variable name
+  // This could be any semantic in {@link AttributeSemantic} or custom semantics
+  // in the glTF
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  for (var i = 0; i < attributesLength; ++i) {
+    if (attributes[i].semantic === variable) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getStyleEvaluation(primitive, featureMetadata, style) {
-  var featureIdAttributes = primitive.featureIdAttributes;
-  var featureIdAttributesLength = featureIdAttributes.length;
+  var i;
 
-  // Get all the property IDs
+  var requireCpuStyling = false; // Style must be evaluated on the CPU
+  var requireGpuStyling = false; // Style must be evaluated on the GPU
+  var preferGpuStyling = false; // Style should be evaluated on the GPU but not required
+  var usesBuiltInTime = false; // Uses tiles3d_tileset_time
+
+  // Separate variables into property IDs, attributes, and built-in variables
   var styleVariables = style.getVariables();
   var variables = styleVariables.variables;
+  var propertyIds = [];
+  var attributeSemantics = [];
   var builtInVariables = styleVariables.builtInVariables;
 
   var variablesLength = variables.length;
-  for (var i = 0; i < variablesLength; ++i) {
-    var propertyId = variables[i];
-    var propertyType = getPropertyType(primitive, featureMetadata, propertyId);
-    if (!defined(propertyType)) {
+  for (i = 0; i < variablesLength; ++i) {
+    var variable = variables[i];
+    if (hasAttributeSemantic(primitive, variable)) {
+      attributeSemantics.push(variable);
+    } else if (hasPropertyId(primitive, featureMetadata, variable)) {
+      propertyIds.push(variable);
+    } else {
+      // TODO: or should it use the "undefined" sentinel
       throw new RuntimeError(
-        "Style references a property that does not exist or is not styleable: " +
-          propertyId
+        "Style references a property that does not exist: " + variable
       );
     }
   }
 
-  // Check if any variables refer to JSON property or hierarchy properties.
-  // If so CPU shading must be used.
+  var propertyIdsLength = propertyIds.length;
+  for (i = 0; i < propertyIdsLength; ++i) {
+    var propertyId = propertyIds[i];
+    if (!isPropertyGpuCompatible(primitive, featureMetadata, propertyId)) {
+      // Examples of properties that can only be evaluated on the CPU:
+      // * JSON properties
+      // * Batch table hierarchy properties
+      // * String properties
+      // * Variable-size arrays
+      // * Arrays with more than 4 components
+      requireCpuStyling = true;
+    }
+  }
 
-  var propertyIdMap = {};
+  var hasColorStyle = defined(style.color);
+  var hasShowStyle = defined(style.show);
+  var hasPointSizeStyle =
+    defined(style.pointSize) &&
+    primitive.primitiveType === PrimitiveType.POINTS;
+
+  if (
+    (hasColorStyle && !defined(style.color.getShaderFunction)) ||
+    (hasShowStyle && !defined(style.show.getShaderFunction)) ||
+    (hasPointSizeStyle && !defined(style.pointSize.getShaderFunction))
+  ) {
+    // Style is using custom evaluate functions. Must be evaluated on the CPU.
+    requireCpuStyling = true;
+  }
+
+  var builtInVariablesLength = builtInVariables.length;
+  for (i = 0; i < builtInVariablesLength; ++i) {
+    var builtInVariable = builtInVariables[i];
+    if (builtInVariable === "tiles3d_tileset_time") {
+      // Styles using tiles3d_tileset_time should be evaluated every frame on the GPU
+      usesBuiltInTime = true;
+      preferGpuStyling = true;
+    }
+  }
+
+  // var propertyIdMap = {};
 
   // What to do about default values
 
