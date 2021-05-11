@@ -3,6 +3,7 @@ import Cartesian4 from "../Core/Cartesian4.js";
 import defined from "../Core/defined.js";
 import Matrix3 from "../Core/Matrix3.js";
 import PrimitiveType from "../Core/PrimitiveType.js";
+import RuntimeError from "../Core/RuntimeError.js";
 import AlphaMode from "./AlphaMode.js";
 import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
@@ -57,24 +58,18 @@ function getPropertyType(primitive, featureMetadata, propertyId) {
     var featureTableId = featureIdAttribute.featureTableId;
     var featureTable = featureMetadata.getFeatureTable(featureTableId);
     if (featureTable.hasProperty(0, propertyId)) {
-      // TODO: need a better way to check if the property exists when using batch table hierarchy
-      return PropertyType.JSON;
+      // TODO: need a better way to check if the property exists in the batch table hierarchy
+      if (defined(featureTable.class)) {
+        var classProperties = featureTable.class.properties;
+        var classProperty = classProperties[propertyId];
+        if (defined(classProperty)) {
+          if (isPropertyGpuCompatible(classProperty)) {
+            return PropertyType.GPU;
+          }
+        }
+      }
+      return PropertyType.CPU;
     }
-
-    // if (defined(featureTable.class)) {
-    //   var classProperties = featureTable.class.properties
-    //   var property = classProperties[propertyId];
-    //   if (defined(classProperty)) {
-    //     if (isPropertyGpuCompatible(classProperty)) {
-
-    //     }
-    //     var type = classProperty.type;
-    //     var componentType =
-    //     if (type === MetadataType.ARRAY &&
-
-    //     return PropertyType.BINARY;
-    //   }
-    // }
   }
 
   return undefined;
@@ -89,10 +84,16 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
   var variables = styleVariables.variables;
   var builtInVariables = styleVariables.builtInVariables;
 
-  var variablesLength = styleVariables.variables.length;
+  var variablesLength = variables.length;
   for (var i = 0; i < variablesLength; ++i) {
-    var propertyId = styleVariables.variables[i];
+    var propertyId = variables[i];
     var propertyType = getPropertyType(primitive, featureMetadata, propertyId);
+    if (!defined(propertyType)) {
+      throw new RuntimeError(
+        "Style references a property that does not exist or is not styleable: " +
+          propertyId
+      );
+    }
   }
 
   // Check if any variables refer to JSON property or hierarchy properties.
