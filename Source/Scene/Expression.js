@@ -2001,7 +2001,10 @@ function getVariableName(variableName, propertyNameMap) {
   return propertyNameMap[variableName];
 }
 
-var nullSentinel = "czm_infinity"; // null just needs to be some sentinel value that will cause "[expression] === null" to be false in nearly all cases. GLSL doesn't have a NaN constant so use czm_infinity.
+/**
+ * @private
+ */
+Expression.NULL_SENTINEL = "czm_infinity"; // null just needs to be some sentinel value that will cause "[expression] === null" to be false in nearly all cases. GLSL doesn't have a NaN constant so use czm_infinity.
 
 Node.prototype.getShaderExpression = function (
   propertyNameMap,
@@ -2142,7 +2145,7 @@ Node.prototype.getShaderExpression = function (
         "Error generating style shader: Converting a variable to a string is not supported."
       );
     case ExpressionNodeType.LITERAL_NULL:
-      return nullSentinel;
+      return Expression.NULL_SENTINEL;
     case ExpressionNodeType.LITERAL_BOOLEAN:
       return value ? "true" : "false";
     case ExpressionNodeType.LITERAL_NUMBER:
@@ -2279,7 +2282,7 @@ Node.prototype.getShaderExpression = function (
         "Error generating style shader: Regular expressions are not supported."
       );
     case ExpressionNodeType.LITERAL_UNDEFINED:
-      return nullSentinel;
+      return Expression.NULL_SENTINEL;
     case ExpressionNodeType.BUILTIN_VARIABLE:
       if (value === "tiles3d_tileset_time") {
         return "u_time";
