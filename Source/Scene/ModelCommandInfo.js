@@ -38,6 +38,29 @@ function getFeatureTableContainingProperty(
       return featureTable;
     }
   }
+  return undefined;
+}
+
+function getFeatureTextureContainingProperty(
+  primitive,
+  featureMetadata,
+  propertyId
+) {
+  var featureTextureIds = primitive.featureTextureIds;
+  var featureTextureIdsLength = featureTextureIds.length;
+
+  for (var i = 0; i < featureTextureIdsLength; ++i) {
+    var featureTextureId = featureTextureIds[i];
+    var featureTexture = featureMetadata.getFeatureTexture(featureTextureId);
+    if (defined(featureTexture.class.properties.// semantic
+
+    if (featureTable.hasProperty(0, propertyId)) {
+      // TODO: need a better way to check if the property exists in the batch table hierarchy
+      return featureTable;
+    }
+  }
+  return undefined;
+
 }
 
 function isClassPropertyGpuCompatible(classProperty) {
@@ -68,7 +91,7 @@ function isPropertyGpuCompatible(primitive, featureMetadata, propertyId) {
     propertyId
   );
 
-  if (defined(featureTable.class)) {
+  if (defined(featureTable) && defined(featureTable.class)) {
     var classProperties = featureTable.class.properties;
     var classProperty = classProperties[propertyId];
     if (defined(classProperty)) {
@@ -79,22 +102,15 @@ function isPropertyGpuCompatible(primitive, featureMetadata, propertyId) {
   return false;
 }
 
-function hasPropertyId(primitive, featureMetadata, variable) {
-  if (!defined(featureMetadata)) {
-    return false;
-  }
+function getPropertyId(primitive, featureMetadata, variable) {
+  // TODO: need to take into account semantics, group metadata, etc
 
-  var featureTable = getFeatureTableContainingProperty(
-    primitive,
-    featureMetadata,
-    variable
+  return (
+    defined(featureMetadata) &&
+    defined(
+      getFeatureTableContainingProperty(primitive, featureMetadata, variable)
+    )
   );
-
-  if (defined(featureTable)) {
-    return true;
-  }
-
-  return false;
 }
 
 function hasAttributeSemantic(primitive, variable) {
@@ -149,6 +165,8 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
     }
   }
 
+  var variableNameMap = {};
+
   var propertyIdsLength = propertyIds.length;
   for (i = 0; i < propertyIdsLength; ++i) {
     var propertyId = propertyIds[i];
@@ -174,7 +192,7 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
     (hasShowStyle && !defined(style.show.getShaderFunction)) ||
     (hasPointSizeStyle && !defined(style.pointSize.getShaderFunction))
   ) {
-    // Style is using custom evaluate functions. Must be evaluated on the CPU.
+    // Style uses custom evaluate functions. Must be evaluated on the CPU.
     requireCpuStyling = true;
   }
 
@@ -183,10 +201,23 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
     var builtInVariable = builtInVariables[i];
     if (builtInVariable === "tiles3d_tileset_time") {
       // Styles using tiles3d_tileset_time should be evaluated every frame on the GPU
+      // TODO: swapping the u_time should be done with the property callback thing
       usesBuiltInTime = true;
       preferGpuStyling = true;
     }
   }
+
+  for (i = 0; i < propertyIdsLength; ++i) {
+    //var propertyId = propertyIds[propertyIdsLength];
+    //variableNameMap[propertyId] = "properties." + propertyId;
+  }
+
+  var builtinPropertyNameMap = {
+    POSITION: "czm_3dtiles_builtin_property_POSITION",
+    POSITION_ABSOLUTE: "czm_3dtiles_builtin_property_POSITION_ABSOLUTE",
+    COLOR: "czm_3dtiles_builtin_property_COLOR",
+    NORMAL: "czm_3dtiles_builtin_property_NORMAL",
+  };
 
   // var propertyIdMap = {};
 
@@ -235,9 +266,10 @@ function getStyleEvaluation(primitive, featureMetadata, style) {
 }
 
 function CustomShaderInfo() {
-  this.usesPositions = false;
-  this.usesNormals = false;
-  this.usesTangents = false;
+  this.usesPosition = false;
+  this.usesPositionAbsolute = false;
+  this.usesNormal = false;
+  this.usesTangent = false;
   this.usesTexCoord0 = false;
   this.usesTexCoord1 = false;
   this.usesVertexColor = false;
@@ -257,6 +289,7 @@ function getCustomShaderInfo(primitive) {
   // struct Geometry
   // {
   //   vec3 position;
+  //   vec3 positionAbsolute;
   //   vec3 normal;
   //   vec3 tangent;
   //   vec2 texCoord0;
@@ -272,13 +305,16 @@ function getCustomShaderInfo(primitive) {
     var name = matches[1];
     switch (name) {
       case "position":
-        customShaderInfo.usesPositions = true;
+        customShaderInfo.usesPosition = true;
+        break;
+      case "positionAbsolute":
+        customShaderInfo.usesPositionAbsolute = true;
         break;
       case "normal":
-        customShaderInfo.usesNormals = true;
+        customShaderInfo.usesNormal = true;
         break;
       case "tangent":
-        customShaderInfo.usesTangents = true;
+        customShaderInfo.usesTangent = true;
         break;
       case "texCoord0":
         customShaderInfo.usesTexCoord0 = true;
@@ -322,9 +358,10 @@ function getCustomShaderInfo(primitive) {
 }
 
 function StyleInfo() {
-  this.usesPositions = false;
-  this.usesNormals = false;
-  this.usesTangents = false;
+  this.usesPosition = false;
+  this.usesPositionAbsolute = false;
+  this.usesNormal = false;
+  this.usesTangent = false;
   this.usesTexCoord0 = false;
   this.usesTexCoord1 = false;
   this.usesVertexColor = false;
@@ -367,14 +404,14 @@ ModelCommandInfo.prototype.getShaderKey = function () {
 };
 
 function GeometryInfo() {
-  this.usesNormals = false;
-  this.usesNormalsOctEncoded = false;
-  this.usesNormalsOctEncodedZXY = false;
-  this.usesNormalsQuantized = false;
-  this.usesTangents = false;
-  this.usesTangentsOctEncoded = false;
-  this.usesTangentsOctEncodedZXY = false;
-  this.usesTangentsQuantized = false;
+  this.usesNormal = false;
+  this.usesNormalOctEncoded = false;
+  this.usesNormalOctEncodedZXY = false;
+  this.usesNormalQuantized = false;
+  this.usesTangent = false;
+  this.usesTangentOctEncoded = false;
+  this.usesTangentOctEncodedZXY = false;
+  this.usesTangentQuantized = false;
   this.usesTexCoord0 = false;
   this.usesTexCoord0Quantized = false;
   this.usesTexCoord1 = false;
@@ -382,7 +419,7 @@ function GeometryInfo() {
   this.usesVertexColor = false;
   this.usesVertexColorRGB = false;
   this.usesVertexColorQuantized = false;
-  this.usesPositionsQuantized = false;
+  this.usesPositionQuantized = false;
   this.usesInstancing = false;
   this.usesInstancedTranslation = false;
   this.usesInstancedRotation = false;
@@ -415,14 +452,14 @@ function GeometryInfo() {
 
 GeometryInfo.prototype.getShaderKey = function () {
   var part1 =
-    this.usesNormals |
-    (this.usesNormalsOctEncoded << 2) |
-    (this.usesNormalsOctEncodedZXY << 3) |
-    (this.usesNormalsQuantized << 4) |
-    (this.usesTangents << 5) |
-    (this.usesTangentsOctEncoded << 6) |
-    (this.usesTangentsOctEncodedZXY << 7) |
-    (this.usesTangentsQuantized << 8) |
+    this.usesNormal |
+    (this.usesNormalOctEncoded << 2) |
+    (this.usesNormalOctEncodedZXY << 3) |
+    (this.usesNormalQuantized << 4) |
+    (this.usesTangent << 5) |
+    (this.usesTangentOctEncoded << 6) |
+    (this.usesTangentOctEncodedZXY << 7) |
+    (this.usesTangentQuantized << 8) |
     (this.usesTexCoord0 << 9) |
     (this.usesTexCoord0Quantized << 10) |
     (this.usesTexCoord1 << 11) |
@@ -430,7 +467,7 @@ GeometryInfo.prototype.getShaderKey = function () {
     (this.usesVertexColor << 13) |
     (this.usesVertexColorRGB << 14) |
     (this.usesVertexColorQuantized << 15) |
-    (this.usesPositionsQuantized << 16) |
+    (this.usesPositionQuantized << 16) |
     (this.usesInstancing << 17) |
     (this.usesInstancedTranslation << 18) |
     (this.usesInstancedRotation << 19) |
@@ -613,7 +650,7 @@ function usesNormalAttribute(primitive, customShaderInfo) {
   }
 
   if (defined(customShaderInfo)) {
-    return customShaderInfo.usesNormals;
+    return customShaderInfo.usesNormal;
   }
 
   return !usesUnlitShader(primitive);
@@ -635,7 +672,7 @@ function usesTangentAttribute(primitive, customShaderInfo) {
   }
 
   if (defined(customShaderInfo)) {
-    return customShaderInfo.usesTangents;
+    return customShaderInfo.usesTangent;
   }
 
   return (
@@ -703,12 +740,12 @@ function getGeometryInfo(
   customShaderInfo,
   context
 ) {
-  var usesNormals = usesNormalAttribute(primitive);
-  var usesNormalsQuantized = false;
-  var usesNormalsOctEncoded = false;
-  var usesNormalsOctEncodedZXY = false;
+  var usesNormal = usesNormalAttribute(primitive);
+  var usesNormalQuantized = false;
+  var usesNormalOctEncoded = false;
+  var usesNormalOctEncodedZXY = false;
 
-  if (usesNormals) {
+  if (usesNormal) {
     var normalAttribute = getAttribute(
       primitive.attributes,
       AttributeSemantic.NORMAL
@@ -716,18 +753,18 @@ function getGeometryInfo(
     var normalQuantization = normalAttribute.quantization;
 
     if (defined(normalQuantization)) {
-      usesNormalsOctEncoded = normalQuantization.octEncoded;
-      usesNormalsOctEncodedZXY = normalQuantization.octEncodedZXY;
-      usesNormalsQuantized = !usesNormalsOctEncoded;
+      usesNormalOctEncoded = normalQuantization.octEncoded;
+      usesNormalOctEncodedZXY = normalQuantization.octEncodedZXY;
+      usesNormalQuantized = !usesNormalOctEncoded;
     }
   }
 
-  var usesTangents = usesTangentAttribute(primitive);
-  var usesTangentsQuantized = false;
-  var usesTangentsOctEncoded = false;
-  var usesTangentsOctEncodedZXY = false;
+  var usesTangent = usesTangentAttribute(primitive);
+  var usesTangentQuantized = false;
+  var usesTangentOctEncoded = false;
+  var usesTangentOctEncodedZXY = false;
 
-  if (usesTangents) {
+  if (usesTangent) {
     var tangentAttribute = getAttribute(
       primitive.attributes,
       AttributeSemantic.TANGENT
@@ -735,9 +772,9 @@ function getGeometryInfo(
     var tangentQuantization = tangentAttribute.quantization;
 
     if (defined(tangentQuantization)) {
-      usesTangentsOctEncoded = tangentQuantization.octEncoded;
-      usesTangentsOctEncodedZXY = tangentQuantization.octEncodedZXY;
-      usesTangentsQuantized = !usesTangentsOctEncoded;
+      usesTangentOctEncoded = tangentQuantization.octEncoded;
+      usesTangentOctEncodedZXY = tangentQuantization.octEncodedZXY;
+      usesTangentQuantized = !usesTangentOctEncoded;
     }
   }
 
@@ -776,12 +813,12 @@ function getGeometryInfo(
     usesVertexColorQuantized = defined(vertexColorAttribute.quantization);
   }
 
-  var usesPositions = true;
+  var usesPosition = true;
   var positionAttribute = getAttribute(
     primitive.attributes,
     AttributeSemantic.POSITION
   );
-  var usesPositionsQuantized = defined(positionAttribute.quantized);
+  var usesPositionQuantized = defined(positionAttribute.quantized);
 
   var instances = node.instances;
   var usesInstancing = defined(instances);
@@ -867,23 +904,23 @@ function getGeometryInfo(
   // TODO: custom vertex attributes used in a style or custom shader
 
   var usedVertexAttributesLength =
-    usesPositions +
-    usesNormals +
-    usesTangents +
+    usesPosition +
+    usesNormal +
+    usesTangent +
     usesTexCoord0 +
     usesTexCoord1 +
     usesVertexColor +
     usedInstanceAttributesLength;
 
   var geometryInfo = new GeometryInfo();
-  geometryInfo.usesNormals = usesNormals;
-  geometryInfo.usesNormalsOctEncoded = usesNormalsOctEncoded;
-  geometryInfo.usesNormalsOctEncodedZXY = usesNormalsOctEncodedZXY;
-  geometryInfo.usesNormalsQuantized = usesNormalsQuantized;
-  geometryInfo.usesTangents = usesTangents;
-  geometryInfo.usesTangentsOctEncoded = usesTangentsOctEncoded;
-  geometryInfo.usesTangentsOctEncodedZXY = usesTangentsOctEncodedZXY;
-  geometryInfo.usesTangentsQuantized = usesTangentsQuantized;
+  geometryInfo.usesNormal = usesNormal;
+  geometryInfo.usesNormalOctEncoded = usesNormalOctEncoded;
+  geometryInfo.usesNormalOctEncodedZXY = usesNormalOctEncodedZXY;
+  geometryInfo.usesNormalQuantized = usesNormalQuantized;
+  geometryInfo.usesTangent = usesTangent;
+  geometryInfo.usesTangentOctEncoded = usesTangentOctEncoded;
+  geometryInfo.usesTangentOctEncodedZXY = usesTangentOctEncodedZXY;
+  geometryInfo.usesTangentQuantized = usesTangentQuantized;
   geometryInfo.usesTexCoord0 = usesTexCoord0;
   geometryInfo.usesTexCoord0Quantized = usesTexCoord0Quantized;
   geometryInfo.usesTexCoord1 = usesTexCoord1;
@@ -891,7 +928,7 @@ function getGeometryInfo(
   geometryInfo.usesVertexColor = usesVertexColor;
   geometryInfo.usesVertexColorRGB = usesVertexColorRGB;
   geometryInfo.usesVertexColorQuantized = usesVertexColorQuantized;
-  geometryInfo.usesPositionsQuantized = usesPositionsQuantized;
+  geometryInfo.usesPositionQuantized = usesPositionQuantized;
   geometryInfo.usesInstancing = usesInstancing;
   geometryInfo.usesInstancedTranslation = usesInstancedTranslation;
   geometryInfo.usesInstancedRotation = usesInstancedRotation;
@@ -935,8 +972,8 @@ function getMaterialInfo(primitive, context) {
     defined(metallicRoughness) && !usesSpecularGlossiness;
 
   var unlit = usesUnlitShader(primitive);
-  var usesNormals = usesNormalAttribute(primitive);
-  var usesTangents = usesTangentAttribute(primitive);
+  var usesNormal = usesNormalAttribute(primitive);
+  var usesTangent = usesTangentAttribute(primitive);
 
   var usesDiffuseTexture =
     usesSpecularGlossiness && defined(specularGlossiness.diffuseTexture);
@@ -1020,8 +1057,8 @@ function getMaterialInfo(primitive, context) {
 
   var usesNormalTexture =
     defined(material.normalTexture) &&
-    usesNormals &&
-    (usesTangents || context.standardDerivatives);
+    usesNormal &&
+    (usesTangent || context.standardDerivatives);
 
   var usesNormalTextureTransform =
     usesNormalTexture && usesTextureTransform(material.normalTexture);
