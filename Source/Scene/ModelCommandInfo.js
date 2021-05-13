@@ -49,6 +49,7 @@ function isPropertyGpuCompatible(classProperty) {
 // * Variable-size arrays
 // * Arrays with more than 4 components
 function PropertyInfo() {
+  this.variableName = undefined;
   this.propertyId = undefined;
   this.classProperty = undefined;
   this.requireCpuStyling = false;
@@ -74,6 +75,7 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
   var classProperty;
 
   var propertyInfo = new PropertyInfo();
+  propertyInfo.variableName = variable;
 
   // Check if the property exists in a feature table
   var featureIdAttributes = primitive.featureIdAttributes;
@@ -171,26 +173,80 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
   return undefined;
 }
 
+function CustomShaderInfo() {
+  this.usesPosition = false;
+  this.usesPositionAbsolute = false;
+  this.usesNormal = false;
+  this.usesTangent = false;
+  this.usesTexCoord0 = false;
+  this.usesTexCoord1 = false;
+  this.usesVertexColor = false;
+  this.usesFeatureId0 = false;
+  this.usesFeatureId1 = false;
+}
+
+function getAttributeNameForStyle(attributeSemantic) {}
+
 function hasAttributeSemantic(primitive, variable) {
-  if (variable === "POSITION_ABSOLUTE") {
-    // POSITION_ABSOLUTE is not technically an attribute but it needs to be
-    // supported for backwards compatibility with pnts styling.
+  // Get the attribute semantic matching the variable name
+  // This could be any semantic in {@link AttributeSemantic} or custom semantics in the glTF
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  var hasPositionAttribute = false;
+  for (var i = 0; i < attributesLength; ++i) {
+    var semantic = attributes[i].semantic;
+    if (semantic === variable) {
+      return true;
+    }
+    if (semantic === AttributeSemantic.POSITION) {
+      hasPositionAttribute = true;
+    }
+  }
+
+  if (hasPositionAttribute && variable === "POSITION_ABSOLUTE") {
+    // POSITION_ABSOLUTE is not technically an attribute but it can be derived
+    // from the POSITION attribute.
+    //
+    // Supported for backwards compatibility with pnts styling.
     // See https://github.com/CesiumGS/3d-tiles/tree/master/specification/Styling#point-cloud
     return true;
   }
 
-  // Get the attribute semantic matching the variable name
-  // This could be any semantic in {@link AttributeSemantic} or custom semantics
-  // in the glTF
-  var attributes = primitive.attributes;
-  var attributesLength = attributes.length;
-  for (var i = 0; i < attributesLength; ++i) {
-    if (attributes[i].semantic === variable) {
-      return true;
-    }
-  }
-
   return false;
+}
+
+var StyleableAttributeSemantic = {
+  // Geometry attributes
+  POSITION: AttributeSemantic.POSITION,
+  NORMAL: AttributeSemantic.NORMAL,
+  TANGENT: AttributeSemantic.TANGENT,
+  TEXCOORD_0: AttributeSemantic.TEXCOORD_0,
+  TEXCOORD_1: AttributeSemantic.TEXCOORD_1,
+  COLOR: AttributeSemantic.COLOR,
+  FEATURE_ID_0: AttributeSemantic.FEATURE_ID_0,
+  FEATURE_ID_1: AttributeSemantic.FEATURE_ID_1,
+  // Derived attributes
+  POSITION_ABSOLUTE: "POSITION_ABSOLUTE"
+};
+
+function getShaderNameFromAttributeSemantic(semantic) {
+  switch (semantic) {
+    case AttributeSemantic.POSITION:
+      return "position";
+    case AttributeSemantic.NORMAL:
+      return "normal";
+    case AttributeSemantic.TANGENT:
+      return "tangent";
+    case AttributeSemantic.TEXCOORD_0:
+      return "texCoord0";
+    case AttributeSemantic.TEXCOORD_1:
+      return "texCoord1";
+    case AttributeSemantic.COLOR:
+      return "vertexColor";
+    case AttributeSemantic.FEATURE_ID_0:
+      return "featureId0";
+    case "POSITION_ABSOLUTE"
+  }
 }
 
 function getStyleEvaluation(model, primitive, featureMetadata, style) {
@@ -230,7 +286,8 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
     undefinedVariables.push(variable);
   }
 
-  if (attributes.length > 0) {
+  var attributesLength = attributes.length;
+  if (attributesLength > 0) {
     // Any style that references vertex attributes requires GPU styling
     requireGpuStyling = true;
   }
@@ -283,13 +340,14 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
 
   for (i = 0; i < attributesLength; ++i) {
     var attribute = attributes[i];
-    variableSubstitutionMap[attribute] = "properties." + propertyId;
+    variableSubstitutionMap[attribute] = "attributes." + attribute;
   }
 
   for (i = 0; i < propertiesLength; ++i) {
     propertyInfo = properties[i];
+    var variableName = propertyInfo.variableName;
     var propertyId = propertyInfo.propertyId;
-    variableSubstitutionMap[propertyId] = "properties." + propertyId;
+    variableSubstitutionMap[variableName] = "properties." + propertyId;
   }
 
   for (i = 0; i < undefinedVariablesLength; ++i) {

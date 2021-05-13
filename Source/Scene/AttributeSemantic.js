@@ -31,20 +31,12 @@ var AttributeSemantic = {
   TANGENT: "TANGENT",
 
   /**
-   * Per-vertex texture coordinates (first set).
+   * Per-vertex texture coordinates.
    *
    * @type {String}
    * @constant
    */
-  TEXCOORD_0: "TEXCOORD_0",
-
-  /**
-   * Per-vertex texture coordinates (second set).
-   *
-   * @type {String}
-   * @constant
-   */
-  TEXCOORD_1: "TEXCOORD_1",
+  TEXCOORD: "TEXCOORD",
 
   /**
    * Per-vertex color.
@@ -71,55 +63,12 @@ var AttributeSemantic = {
   WEIGHTS: "WEIGHTS",
 
   /**
-   * Per-vertex feature IDs (first set).
+   * Per-vertex feature IDs.
    *
    * @type {String}
    * @constant
    */
-  FEATURE_ID_0: "FEATURE_ID_0",
-
-  /**
-   * Per-vertex feature IDs (second set).
-   *
-   * @type {String}
-   * @constant
-   */
-  FEATURE_ID_1: "FEATURE_ID_1",
-};
-
-/**
- * Gets the built-in semantic from the glTF semantic.
- *
- * @param {String} gltfSemantic The glTF semantic.
- * @returns {String} The built-in semantic, or the glTF semantic if there is no corresponding build-in semantic.
- *
- * @private
- */
-AttributeSemantic.fromGltfSemantic = function (gltfSemantic) {
-  switch (gltfSemantic) {
-    case "POSITION":
-      return AttributeSemantic.POSITION;
-    case "NORMAL":
-      return AttributeSemantic.NORMAL;
-    case "TANGENT":
-      return AttributeSemantic.TANGENT;
-    case "TEXCOORD_0":
-      return AttributeSemantic.TEXCOORD_0;
-    case "TEXCOORD_1":
-      return AttributeSemantic.TEXCOORD_1;
-    case "COLOR_0":
-      return AttributeSemantic.COLOR;
-    case "JOINTS_0":
-      return AttributeSemantic.JOINTS;
-    case "WEIGHTS_0":
-      return AttributeSemantic.WEIGHTS;
-    case "_FEATURE_ID_0":
-      return AttributeSemantic.FEATURE_ID_0;
-    case "_FEATURE_ID_1":
-      return AttributeSemantic.FEATURE_ID_1;
-    default:
-      return gltfSemantic;
-  }
+  FEATURE_ID: "FEATURE_ID",
 };
 
 export default Object.freeze(AttributeSemantic);

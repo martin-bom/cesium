@@ -101,6 +101,18 @@ function Attribute() {
   this.semantic = undefined;
 
   /**
+   * The set index of the attribute. Only applicable when the attribute has one
+   * of the following semantics:
+   *
+   * <ul>
+   *   <li>{@link AttributeSemantic.TEXCOORD}</li>
+   *   <li>{@link AttributeSemantic.COLOR}</li>
+   *   <li>{@link AttributeSemantic.FEATURE_ID}</li>
+   * </ul>
+   */
+  this.setIndex = undefined;
+
+  /**
    * The component data type of the attribute.
    * <p>
    * When the data is quantized the componentDatatype should match the
@@ -395,7 +407,7 @@ function Primitive() {
 
   /**
    * TODO: what about if this is eventually a custom vertex shader... does this belong in the material?
-   * 
+   *
    * The custom shader.
    *
    * @type {String}

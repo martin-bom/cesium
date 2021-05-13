@@ -442,11 +442,56 @@ function createAttribute(gltf, accessorId, semantic) {
   return attribute;
 }
 
+function getSemanticAndSetIndex(gltfSemantic) {
+  var setIndexRegex = /_?(\w+)_(\d+)$/;
+  var setIndexMatch = setIndexRegex.exec(gltfSemantic);
+  if (setIndexMatch !== null) {
+    // Underscore prefix is removed, set index is removed
+    // E.g. _FEATURE_ID_0 becomes FEATURE_ID
+    var semantic = setIndexMatch[1];
+    var setIndex = setIndexMatch[2];
+
+    // Set index is ignored for joints/weights
+    // TODO: need warning?
+    if (
+      semantic === AttributeSemantic.JOINTS ||
+      semantic === AttributeSemantic.WEIGHTS
+    ) {
+      return {
+        semantic: semantic,
+      };
+    }
+
+    if (
+      semantic === AttributeSemantic.TEXCOORD ||
+      semantic === AttributeSemantic.COLOR ||
+      semantic === AttributeSemantic.FEATURE_ID
+    ) {
+      return {
+        semantic: semantic,
+        setIndex: setIndex,
+      };
+    }
+
+    // For
+    return {
+      semantic: gltfSemantic,
+    };
+  }
+
+  return {
+    semantic: gltfSemantic,
+  };
+}
+
 function loadVertexAttribute(loader, gltf, accessorId, gltfSemantic, draco) {
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
-  var semantic = AttributeSemantic.fromGltfSemantic(gltfSemantic);
+  var semantic = defaultValue(
+    AttributeSemantic.fromGltfSemantic(gltfSemantic),
+    gltfSemantic
+  );
   var attribute = createAttribute(gltf, accessorId, semantic);
 
   if (!defined(draco) && !defined(bufferViewId)) {
