@@ -23,7 +23,7 @@ var InstanceAttributeSemantic = {
   ROTATION: "ROTATION",
 
   /**
-   * Per-instance SCALE.
+   * Per-instance scale.
    *
    * @type {String}
    * @constant
@@ -31,45 +31,12 @@ var InstanceAttributeSemantic = {
   SCALE: "SCALE",
 
   /**
-   * Per-vertex feature IDs (first set).
+   * Per-vertex feature ID.
    *
    * @type {String}
    * @constant
    */
-  FEATURE_ID_0: "FEATURE_ID_0",
-
-  /**
-   * Per-vertex feature IDs (second set).
-   *
-   * @type {String}
-   * @constant
-   */
-  FEATURE_ID_1: "FEATURE_ID_1",
-};
-
-/**
- * Gets the built-in semantic from the glTF semantic.
- *
- * @param {String} gltfSemantic The glTF semantic.
- * @returns {String} The built-in semantic, or the glTF semantic if there is no corresponding build-in semantic.
- *
- * @private
- */
-InstanceAttributeSemantic.fromGltfSemantic = function (gltfSemantic) {
-  switch (gltfSemantic) {
-    case "TRANSLATION":
-      return InstanceAttributeSemantic.TRANSLATION;
-    case "ROTATION":
-      return InstanceAttributeSemantic.ROTATION;
-    case "SCALE":
-      return InstanceAttributeSemantic.SCALE;
-    case "_FEATURE_ID_0":
-      return InstanceAttributeSemantic.FEATURE_ID_0;
-    case "_FEATURE_ID_1":
-      return InstanceAttributeSemantic.FEATURE_ID_1;
-    default:
-      return gltfSemantic;
-  }
+  FEATURE_ID_0: "FEATURE_ID",
 };
 
 export default Object.freeze(InstanceAttributeSemantic);

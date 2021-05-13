@@ -63,7 +63,7 @@ var AttributeSemantic = {
   WEIGHTS: "WEIGHTS",
 
   /**
-   * Per-vertex feature IDs.
+   * Per-vertex feature ID.
    *
    * @type {String}
    * @constant

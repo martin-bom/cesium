@@ -423,12 +423,13 @@ function getDefault(MathType) {
   return new MathType(); // defaults to 0.0 for all types
 }
 
-function createAttribute(gltf, accessorId, semantic) {
+function createAttribute(gltf, accessorId, semantic, setIndex) {
   var accessor = gltf.accessors[accessorId];
   var MathType = AttributeType.getMathType(accessor.type);
 
   var attribute = new Attribute();
   attribute.semantic = semantic;
+  attribute.setIndex = setIndex;
   attribute.constant = getDefault(MathType);
   attribute.componentDatatype = accessor.componentType;
   attribute.normalized = defaultValue(accessor.normalized, false);
@@ -446,39 +447,16 @@ function getSemanticAndSetIndex(gltfSemantic) {
   var setIndexRegex = /_?(\w+)_(\d+)$/;
   var setIndexMatch = setIndexRegex.exec(gltfSemantic);
   if (setIndexMatch !== null) {
-    // Underscore prefix is removed, set index is removed
-    // E.g. _FEATURE_ID_0 becomes FEATURE_ID
+    // Example: _FEATURE_ID_0 is split into FEATURE_ID and 0 (preceding underscore is removed)
     var semantic = setIndexMatch[1];
     var setIndex = setIndexMatch[2];
-
-    // Set index is ignored for joints/weights
-    // TODO: need warning?
-    if (
-      semantic === AttributeSemantic.JOINTS ||
-      semantic === AttributeSemantic.WEIGHTS
-    ) {
-      return {
-        semantic: semantic,
-      };
-    }
-
-    if (
-      semantic === AttributeSemantic.TEXCOORD ||
-      semantic === AttributeSemantic.COLOR ||
-      semantic === AttributeSemantic.FEATURE_ID
-    ) {
+    if (defined(AttributeSemantic[semantic])) {
       return {
         semantic: semantic,
         setIndex: setIndex,
       };
     }
-
-    // For
-    return {
-      semantic: gltfSemantic,
-    };
   }
-
   return {
     semantic: gltfSemantic,
   };
@@ -488,11 +466,11 @@ function loadVertexAttribute(loader, gltf, accessorId, gltfSemantic, draco) {
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
-  var semantic = defaultValue(
-    AttributeSemantic.fromGltfSemantic(gltfSemantic),
-    gltfSemantic
-  );
-  var attribute = createAttribute(gltf, accessorId, semantic);
+  var semanticAndSetIndex = getSemanticAndSetIndex(gltfSemantic);
+  var semantic = semanticAndSetIndex.semantic;
+  var setIndex = semanticAndSetIndex.index;
+
+  var attribute = createAttribute(gltf, accessorId, semantic, setIndex);
 
   if (!defined(draco) && !defined(bufferViewId)) {
     return attribute;
@@ -539,8 +517,10 @@ function loadInstancedAttribute(
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
-  var semantic = InstanceAttributeSemantic.fromGltfSemantic(gltfSemantic);
-  var attribute = createAttribute(gltf, accessorId, semantic);
+  var semanticAndSetIndex = getSemanticAndSetIndex(gltfSemantic);
+  var semantic = semanticAndSetIndex.semantic;
+  var setIndex = semanticAndSetIndex.index;
+  var attribute = createAttribute(gltf, accessorId, semantic, setIndex);
 
   if (!defined(bufferViewId)) {
     return attribute;

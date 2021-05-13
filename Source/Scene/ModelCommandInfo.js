@@ -42,23 +42,69 @@ function isPropertyGpuCompatible(classProperty) {
   return true;
 }
 
-// Examples of properties that can only be evaluated on the CPU:
-// * JSON properties
-// * Batch table hierarchy properties
-// * String properties
-// * Variable-size arrays
-// * Arrays with more than 4 components
-function PropertyInfo() {
-  this.variableName = undefined;
-  this.propertyId = undefined;
-  this.classProperty = undefined;
-  this.requireCpuStyling = false;
-  this.requireGpuStyling = false;
-  this.featureTableId = undefined;
-  this.featureTextureId = undefined;
-  this.tileMetadata = undefined;
-  this.groupMetadata = undefined;
-  this.tilesetMetadata = undefined;
+function AttributeInfo(semantic, setIndex) {
+  this.semantic = options.semantic;
+  this.setIndex = options.setIndex;
+}
+
+function getAttributeInfo(primitive, variable) {
+  // Get the attribute matching the variable name. This could be any semantic
+  // in {@link StyleableAttributeSemantic} or a custom semantic in the glTF
+  var semantic = variable;
+  var setIndex;
+
+  var setIndexRegex = /(\w+)_(\d+)$/;
+  var setIndexMatch = setIndexRegex.exec(semantic);
+  if (setIndexMatch !== null) {
+    // Example: FEATURE_ID_0 is split into FEATURE_ID and 0
+    var semantic = setIndexMatch[1];
+    var setIndex = setIndexMatch[2];
+    if (defined(StyleableAttributeSemantic[semantic])) {
+      var attributeInfo = new AttributeInfo();
+      attributeInfo.semantic = semantic;
+      attributeInfo.setIndex = setIndex;
+    }
+  }
+
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  var hasPositionAttribute = false;
+  for (var i = 0; i < attributesLength; ++i) {
+    var attribute = attributes[i];
+    if (semantic === attribute.semantic && setIndex === attribute.setIndex) {
+      return new AttributeInfo({
+        semantic: semantic,
+        setIndex: setIndex,
+      });
+    }
+    if (semantic === AttributeSemantic.POSITION) {
+      hasPositionAttribute = true;
+    }
+  }
+
+  if (
+    hasPositionAttribute &&
+    semantic === StyleableAttributeSemantic.POSITION_ABSOLUTE
+  ) {
+    return new AttributeInfo({
+      semantic: semantic,
+    });
+  }
+
+  return undefined;
+}
+
+function PropertyInfo(options) {
+  this.variableName = options.variableName;
+  this.propertyId = options.propertyId;
+  this.classProperty = options.classProperty;
+  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
+  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
+  this.featureTableId = options.featureTableId;
+  this.featureTextureId = options.featureTextureId;
+  this.tileMetadata = options.tileMetadata;
+  this.groupMetadata = options.groupMetadata;
+  this.tilesetMetadata = options.tilesetMetadata;
 }
 
 function getClassProperty(classDefinition, variable) {
@@ -70,12 +116,9 @@ function getClassProperty(classDefinition, variable) {
   );
 }
 
-function getPropertyInfo(model, primitive, featureMetadata, variable) {
+function getPropertyInfo(content, primitive, featureMetadata, variable) {
   var i;
   var classProperty;
-
-  var propertyInfo = new PropertyInfo();
-  propertyInfo.variableName = variable;
 
   // Check if the property exists in a feature table
   var featureIdAttributes = primitive.featureIdAttributes;
@@ -85,29 +128,33 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
     var featureIdAttribute = featureIdAttributes[i];
     var featureTableId = featureIdAttribute.featureTableId;
     var featureTable = featureMetadata.getFeatureTable(featureTableId);
+    if (defined(featureTable.class)) {
+      classProperty = getClassProperty(featureTable.class, variable);
+      if (defined(classProperty)) {
+        // Requires CPU styling if the property is a string, variable-size
+        // array, or fixed-size array with more than 4 components
+        return new PropertyInfo({
+          variableName: variable,
+          requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+          propertyId: classProperty.id,
+          classProperty: classProperty,
+          featureTableId: featureTableId,
+        });
+      }
+    }
+
     if (featureTable.hasProperty(0, variable)) {
       // TODO: need a better way to check if the property exists in the batch table hierarchy
-      if (defined(featureTable.class)) {
-        classProperty = getClassProperty(featureTable.class, variable);
-        if (defined(classProperty)) {
-          // Requires CPU styling if the property is a string, variable-size
-          // array, or fixed-size array with more than 4 components
-          propertyInfo.requireCpuStyling = !isPropertyGpuCompatible(
-            classProperty
-          );
-          propertyInfo.propertyId = classProperty.id;
-          propertyInfo.classProperty = classProperty;
-          propertyInfo.featureTableId = featureTableId;
-          return propertyInfo;
-        }
-      }
 
       // Requires CPU styling if the property is a JSON property or batch
       // table hierarchy property
-      propertyInfo.requireCpuStyling = true;
-      propertyInfo.propertyId = variable;
-      propertyInfo.featureTableId = featureIdAttribute.featureTableId;
-      return propertyInfo;
+      return new PropertyInfo({
+        variableName: variableName,
+        requireCpuStyling: true,
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        featureTableId: featureTableId,
+      });
     }
   }
 
@@ -121,25 +168,28 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
     classProperty = getClassProperty(featureTexture.class, variable);
     if (defined(classProperty)) {
       // Feature textures require GPU styling
-      propertyInfo.requireGpuStyling = true;
-      propertyInfo.propertyId = classProperty.id;
-      propertyInfo.classProperty = classProperty;
-      propertyInfo.featureTextureId = featureTextureId;
-      return propertyInfo;
+      return new PropertyInfo({
+        variableName: variableName,
+        requireGpuStyling: true,
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        featureTextureId: featureTextureId,
+      });
     }
   }
 
   // Check if the property exists in tile metadata
-  var content = model.content; // TODO: make this work for voxels
   var tileMetadata = content.tile.metadata;
   if (defined(tileMetadata)) {
     classProperty = getClassProperty(tileMetadata.class, variable);
     if (defined(classProperty)) {
-      propertyInfo.requireCpuStyling = !isPropertyGpuCompatible(classProperty);
-      propertyInfo.propertyId = classProperty.id;
-      propertyInfo.classProperty = classProperty;
-      propertyInfo.tileMetadata = tileMetadata;
-      return propertyInfo;
+      return new PropertyInfo({
+        variableName: variableName,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        tileMetadata: tileMetadata,
+      });
     }
   }
 
@@ -148,11 +198,13 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
   if (defined(groupMetadata)) {
     classProperty = getClassProperty(groupMetadata.class, variable);
     if (defined(classProperty)) {
-      propertyInfo.requireCpuStyling = !isPropertyGpuCompatible(classProperty);
-      propertyInfo.propertyId = classProperty.id;
-      propertyInfo.classProperty = classProperty;
-      propertyInfo.groupMetadata = groupMetadata;
-      return propertyInfo;
+      return new PropertyInfo({
+        variableName: variableName,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        groupMetadata: groupMetadata,
+      });
     }
   }
 
@@ -161,11 +213,13 @@ function getPropertyInfo(model, primitive, featureMetadata, variable) {
   if (defined(tilesetMetadata) && defined(tilesetMetadata.tileset)) {
     classProperty = getClassProperty(groupMetadata.class, variable);
     if (defined(classProperty)) {
-      propertyInfo.requireCpuStyling = !isPropertyGpuCompatible(classProperty);
-      propertyInfo.propertyId = classProperty.id;
-      propertyInfo.classProperty = classProperty;
-      propertyInfo.tilesetMetadata = tilesetMetadata;
-      return propertyInfo;
+      return new PropertyInfo({
+        variableName: variableName,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        groupMetadata: tilesetMetadata,
+      });
     }
   }
 
@@ -215,47 +269,13 @@ function hasAttributeSemantic(primitive, variable) {
   return false;
 }
 
-var StyleableAttributeSemantic = {
-  // Geometry attributes
-  POSITION: AttributeSemantic.POSITION,
-  NORMAL: AttributeSemantic.NORMAL,
-  TANGENT: AttributeSemantic.TANGENT,
-  TEXCOORD_0: AttributeSemantic.TEXCOORD_0,
-  TEXCOORD_1: AttributeSemantic.TEXCOORD_1,
-  COLOR: AttributeSemantic.COLOR,
-  FEATURE_ID_0: AttributeSemantic.FEATURE_ID_0,
-  FEATURE_ID_1: AttributeSemantic.FEATURE_ID_1,
-  // Derived attributes
-  POSITION_ABSOLUTE: "POSITION_ABSOLUTE"
-};
-
-function getShaderNameFromAttributeSemantic(semantic) {
-  switch (semantic) {
-    case AttributeSemantic.POSITION:
-      return "position";
-    case AttributeSemantic.NORMAL:
-      return "normal";
-    case AttributeSemantic.TANGENT:
-      return "tangent";
-    case AttributeSemantic.TEXCOORD_0:
-      return "texCoord0";
-    case AttributeSemantic.TEXCOORD_1:
-      return "texCoord1";
-    case AttributeSemantic.COLOR:
-      return "vertexColor";
-    case AttributeSemantic.FEATURE_ID_0:
-      return "featureId0";
-    case "POSITION_ABSOLUTE"
-  }
-}
-
 function getStyleEvaluation(model, primitive, featureMetadata, style) {
   var i;
   var propertyInfo;
 
   var requireCpuStyling = false; // Style must be evaluated on the CPU
   var requireGpuStyling = false; // Style must be evaluated on the GPU
-  var preferGpuStyling = false; // Style should be evaluated on the GPU but not required
+  var preferGpuStyling = false; // Prefer evaluating the style on the GPU
   var usesBuiltInTime = false; // Uses tiles3d_tileset_time
 
   // Separate variables into attributes, properties, undefined variables, and built-in variables
@@ -269,7 +289,7 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
   var variablesLength = variables.length;
   for (i = 0; i < variablesLength; ++i) {
     var variable = variables[i];
-    if (hasAttributeSemantic(primitive, variable)) {
+    if (isAttributeSemantic(primitive, variable)) {
       // This variable refers to a vertex attribute, e.g. ${POSITION}
       attributes.push(variable);
       continue;
@@ -498,6 +518,8 @@ function getCustomShaderInfo(primitive) {
 
   return customShaderInfo;
 }
+
+// TODO: ${COLOR} evaluates to the application-specific default color
 
 function StyleInfo() {
   this.usesPosition = false;

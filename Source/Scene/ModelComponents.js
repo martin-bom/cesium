@@ -107,6 +107,8 @@ function Attribute() {
    * <ul>
    *   <li>{@link AttributeSemantic.TEXCOORD}</li>
    *   <li>{@link AttributeSemantic.COLOR}</li>
+   *   <li>{@link AttributeSemantic.JOINTS}</li>
+   *   <li>{@link AttributeSemantic.WEIGHTS}</li>
    *   <li>{@link AttributeSemantic.FEATURE_ID}</li>
    * </ul>
    */
