@@ -11,6 +11,7 @@ import AttributeType from "./AttributeType.js";
 import Expression from "./Expression.js";
 import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 import MetadataType from "./MetadataType.js";
+import StyleableAttributeSemantic from "./StyleableAttributeSemantic.js";
 
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
@@ -20,8 +21,73 @@ var StyleEvaluation = {
   EVALUATE_CPU_APPLY_GPU_FRAG: 1,
   EVALUATE_GPU_APPLY_GPU_VERT: 2,
   EVALUATE_GPU_APPLY_GPU_FRAG: 3,
-  NONE: 4,
 };
+
+function AttributeInfo(options) {
+  this.variableName = options.variableName;
+  this.semantic = options.semantic;
+  this.setIndex = options.setIndex;
+}
+
+function getAttributeInfo(primitive, variableName) {
+  // Get the attribute matching the variable name. This could be any attribute
+  // in {@link StyleableAttributeSemantic} or a custom attribute.
+  var semantic;
+  var setIndex;
+
+  var setIndexRegex = /(\w+)_(\d+)$/;
+  var setIndexMatch = setIndexRegex.exec(variableName);
+  if (setIndexMatch !== null) {
+    // Example: FEATURE_ID_0 is split into FEATURE_ID and 0
+    semantic = setIndexMatch[1];
+    setIndex = setIndexMatch[2];
+  } else {
+    semantic = variableName;
+  }
+
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  var hasPositionAttribute = false;
+  for (var i = 0; i < attributesLength; ++i) {
+    var attribute = attributes[i];
+    if (attribute.semantic === semantic && attribute.setIndex === setIndex) {
+      return new AttributeInfo({
+        variableName: variableName,
+        semantic: semantic,
+        setIndex: setIndex,
+      });
+    }
+    if (semantic === AttributeSemantic.POSITION) {
+      hasPositionAttribute = true;
+    }
+  }
+
+  if (
+    hasPositionAttribute &&
+    semantic === StyleableAttributeSemantic.POSITION_ABSOLUTE
+  ) {
+    return new AttributeInfo({
+      variableName: variableName,
+      semantic: semantic,
+    });
+  }
+
+  // No attribute found
+  return undefined;
+}
+
+function PropertyInfo(options) {
+  this.variableName = options.variableName;
+  this.propertyId = options.propertyId;
+  this.classProperty = options.classProperty;
+  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
+  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
+  this.featureTableId = options.featureTableId;
+  this.featureTextureId = options.featureTextureId;
+  this.tileMetadata = options.tileMetadata;
+  this.groupMetadata = options.groupMetadata;
+  this.tilesetMetadata = options.tilesetMetadata;
+}
 
 function isPropertyGpuCompatible(classProperty) {
   var type = classProperty.type;
@@ -42,81 +108,16 @@ function isPropertyGpuCompatible(classProperty) {
   return true;
 }
 
-function AttributeInfo(semantic, setIndex) {
-  this.semantic = options.semantic;
-  this.setIndex = options.setIndex;
-}
-
-function getAttributeInfo(primitive, variable) {
-  // Get the attribute matching the variable name. This could be any semantic
-  // in {@link StyleableAttributeSemantic} or a custom semantic in the glTF
-  var semantic = variable;
-  var setIndex;
-
-  var setIndexRegex = /(\w+)_(\d+)$/;
-  var setIndexMatch = setIndexRegex.exec(semantic);
-  if (setIndexMatch !== null) {
-    // Example: FEATURE_ID_0 is split into FEATURE_ID and 0
-    var semantic = setIndexMatch[1];
-    var setIndex = setIndexMatch[2];
-    if (defined(StyleableAttributeSemantic[semantic])) {
-      var attributeInfo = new AttributeInfo();
-      attributeInfo.semantic = semantic;
-      attributeInfo.setIndex = setIndex;
-    }
-  }
-
-  var attributes = primitive.attributes;
-  var attributesLength = attributes.length;
-  var hasPositionAttribute = false;
-  for (var i = 0; i < attributesLength; ++i) {
-    var attribute = attributes[i];
-    if (semantic === attribute.semantic && setIndex === attribute.setIndex) {
-      return new AttributeInfo({
-        semantic: semantic,
-        setIndex: setIndex,
-      });
-    }
-    if (semantic === AttributeSemantic.POSITION) {
-      hasPositionAttribute = true;
-    }
-  }
-
-  if (
-    hasPositionAttribute &&
-    semantic === StyleableAttributeSemantic.POSITION_ABSOLUTE
-  ) {
-    return new AttributeInfo({
-      semantic: semantic,
-    });
-  }
-
-  return undefined;
-}
-
-function PropertyInfo(options) {
-  this.variableName = options.variableName;
-  this.propertyId = options.propertyId;
-  this.classProperty = options.classProperty;
-  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
-  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
-  this.featureTableId = options.featureTableId;
-  this.featureTextureId = options.featureTextureId;
-  this.tileMetadata = options.tileMetadata;
-  this.groupMetadata = options.groupMetadata;
-  this.tilesetMetadata = options.tilesetMetadata;
-}
-
-function getClassProperty(classDefinition, variable) {
+function getClassProperty(classDefinition, variableName) {
   var classProperties = classDefinition.properties;
   var classPropertiesBySemantic = classDefinition.propertiesBySemantic;
   return defaultValue(
-    classPropertiesBySemantic[variable],
-    classProperties[variable]
+    classPropertiesBySemantic[variableName],
+    classProperties[variableName]
   );
 }
 
-function getPropertyInfo(content, primitive, featureMetadata, variable) {
+function getPropertyInfo(content, primitive, featureMetadata, variableName) {
   var i;
   var classProperty;
 
@@ -128,23 +129,24 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
     var featureIdAttribute = featureIdAttributes[i];
     var featureTableId = featureIdAttribute.featureTableId;
     var featureTable = featureMetadata.getFeatureTable(featureTableId);
-    if (defined(featureTable.class)) {
-      classProperty = getClassProperty(featureTable.class, variable);
-      if (defined(classProperty)) {
-        // Requires CPU styling if the property is a string, variable-size
-        // array, or fixed-size array with more than 4 components
-        return new PropertyInfo({
-          variableName: variable,
-          requireCpuStyling: !isPropertyGpuCompatible(classProperty),
-          propertyId: classProperty.id,
-          classProperty: classProperty,
-          featureTableId: featureTableId,
-        });
+    if (
+      featureTable.propertyExistsBySemantic(variableName) ||
+      featureTable.propertyExists(variableName)
+    ) {
+      if (defined(featureTable.class)) {
+        classProperty = getClassProperty(featureTable.class, variableName);
+        if (defined(classProperty)) {
+          // Requires CPU styling if the property is a string, variable-size
+          // array, or fixed-size array with more than 4 components
+          return new PropertyInfo({
+            variableName: variableName,
+            requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+            propertyId: classProperty.id,
+            classProperty: classProperty,
+            featureTableId: featureTableId,
+          });
+        }
       }
-    }
-
-    if (featureTable.hasProperty(0, variable)) {
-      // TODO: need a better way to check if the property exists in the batch table hierarchy
 
       // Requires CPU styling if the property is a JSON property or batch
       // table hierarchy property
@@ -165,7 +167,7 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
   for (i = 0; i < featureTextureIdsLength; ++i) {
     var featureTextureId = featureTextureIds[i];
     var featureTexture = featureMetadata.getFeatureTexture(featureTextureId);
-    classProperty = getClassProperty(featureTexture.class, variable);
+    classProperty = getClassProperty(featureTexture.class, variableName);
     if (defined(classProperty)) {
       // Feature textures require GPU styling
       return new PropertyInfo({
@@ -181,7 +183,7 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
   // Check if the property exists in tile metadata
   var tileMetadata = content.tile.metadata;
   if (defined(tileMetadata)) {
-    classProperty = getClassProperty(tileMetadata.class, variable);
+    classProperty = getClassProperty(tileMetadata.class, variableName);
     if (defined(classProperty)) {
       return new PropertyInfo({
         variableName: variableName,
@@ -196,7 +198,7 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
   // Check if the property exists in group metadata
   var groupMetadata = content.groupMetadata;
   if (defined(groupMetadata)) {
-    classProperty = getClassProperty(groupMetadata.class, variable);
+    classProperty = getClassProperty(groupMetadata.class, variableName);
     if (defined(classProperty)) {
       return new PropertyInfo({
         variableName: variableName,
@@ -211,7 +213,7 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
   // Check if the property exists in tileset metadata
   var tilesetMetadata = content.tileset.metadata;
   if (defined(tilesetMetadata) && defined(tilesetMetadata.tileset)) {
-    classProperty = getClassProperty(groupMetadata.class, variable);
+    classProperty = getClassProperty(groupMetadata.class, variableName);
     if (defined(classProperty)) {
       return new PropertyInfo({
         variableName: variableName,
@@ -227,49 +229,7 @@ function getPropertyInfo(content, primitive, featureMetadata, variable) {
   return undefined;
 }
 
-function CustomShaderInfo() {
-  this.usesPosition = false;
-  this.usesPositionAbsolute = false;
-  this.usesNormal = false;
-  this.usesTangent = false;
-  this.usesTexCoord0 = false;
-  this.usesTexCoord1 = false;
-  this.usesVertexColor = false;
-  this.usesFeatureId0 = false;
-  this.usesFeatureId1 = false;
-}
-
-function getAttributeNameForStyle(attributeSemantic) {}
-
-function hasAttributeSemantic(primitive, variable) {
-  // Get the attribute semantic matching the variable name
-  // This could be any semantic in {@link AttributeSemantic} or custom semantics in the glTF
-  var attributes = primitive.attributes;
-  var attributesLength = attributes.length;
-  var hasPositionAttribute = false;
-  for (var i = 0; i < attributesLength; ++i) {
-    var semantic = attributes[i].semantic;
-    if (semantic === variable) {
-      return true;
-    }
-    if (semantic === AttributeSemantic.POSITION) {
-      hasPositionAttribute = true;
-    }
-  }
-
-  if (hasPositionAttribute && variable === "POSITION_ABSOLUTE") {
-    // POSITION_ABSOLUTE is not technically an attribute but it can be derived
-    // from the POSITION attribute.
-    //
-    // Supported for backwards compatibility with pnts styling.
-    // See https://github.com/CesiumGS/3d-tiles/tree/master/specification/Styling#point-cloud
-    return true;
-  }
-
-  return false;
-}
-
-function getStyleEvaluation(model, primitive, featureMetadata, style) {
+function getStyleInfo(model, primitive, featureMetadata, style) {
   var i;
   var propertyInfo;
 
@@ -280,22 +240,28 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
 
   // Separate variables into attributes, properties, undefined variables, and built-in variables
   var styleVariables = style.getVariables();
-  var variables = styleVariables.variables;
+  var variableNames = styleVariables.variables;
   var attributes = [];
   var properties = [];
-  var undefinedVariables = [];
+  var undefinedVariableNames = [];
   var builtInVariables = styleVariables.builtInVariables;
 
-  var variablesLength = variables.length;
+  var variablesLength = variableNames.length;
   for (i = 0; i < variablesLength; ++i) {
-    var variable = variables[i];
-    if (isAttributeSemantic(primitive, variable)) {
+    var variableName = variableNames[i];
+    var attributeInfo = getAttributeInfo(primitive, variableName);
+    if (defined(attributeInfo)) {
       // This variable refers to a vertex attribute, e.g. ${POSITION}
-      attributes.push(variable);
+      attributes.push(attributeInfo);
       continue;
     }
 
-    propertyInfo = getPropertyInfo(model, primitive, featureMetadata, variable);
+    propertyInfo = getPropertyInfo(
+      model.content,
+      primitive,
+      featureMetadata,
+      variableName
+    );
     if (defined(propertyInfo)) {
       // This variable refers to a property, e.g. ${Height}
       properties.push(propertyInfo);
@@ -303,7 +269,7 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
     }
 
     // This variable doesn't exist
-    undefinedVariables.push(variable);
+    undefinedVariableNames.push(variableName);
   }
 
   var attributesLength = attributes.length;
@@ -321,11 +287,11 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
   }
 
   // Print warning when style references a property that doesn't exist
-  var undefinedVariablesLength = undefinedVariables.length;
+  var undefinedVariablesLength = undefinedVariableNames.length;
   for (i = 0; i < undefinedVariablesLength; ++i) {
     oneTimeWarning(
       "Style references a property that does not exist: " +
-        undefinedVariables[i]
+        undefinedVariableNames[i]
     );
   }
 
@@ -355,12 +321,20 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
     }
   }
 
-  // Build a variable substitution map that converts variable names referenced in the style to variable names
+  // Build a variable substitution map that converts variable names in the style to shader names
   var variableSubstitutionMap = {};
 
   for (i = 0; i < attributesLength; ++i) {
-    var attribute = attributes[i];
-    variableSubstitutionMap[attribute] = "attributes." + attribute;
+    var attributeInfo = attributes[i];
+    var semantic = attributeInfo.semantic;
+    if (defined(StyleableAttributeSemantic[semantic])) {
+      variableSubstitutionMap[attributeInfo.variableName] =
+        "geometry." +
+        StyleableAttributeSemantic.toShaderName(
+          attributeInfo.semantic,
+          attributeInfo.setIndex
+        );
+    }
   }
 
   for (i = 0; i < propertiesLength; ++i) {
@@ -371,7 +345,8 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
   }
 
   for (i = 0; i < undefinedVariablesLength; ++i) {
-    variableSubstitutionMap[undefinedVariables[i]] = Expression.NULL_SENTINEL;
+    variableSubstitutionMap[undefinedVariableNames[i]] =
+      Expression.NULL_SENTINEL;
   }
 
   var builtinPropertyNameMap = {
@@ -384,6 +359,8 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
   // var propertyIdMap = {};
 
   // What to do about default values
+
+  // TODO: should style be _FEATURE_ID_0 or FEATURE_ID_0
 
   // CPU
   //     strings, regex, etc
@@ -425,6 +402,18 @@ function getStyleEvaluation(model, primitive, featureMetadata, style) {
   this.useFragmentShading = primitive.primitiveType !== PrimitiveType.POINTS;
 
   //  var styleShader =
+}
+
+function CustomShaderInfo() {
+  this.usesPosition = false;
+  this.usesPositionAbsolute = false;
+  this.usesNormal = false;
+  this.usesTangent = false;
+  this.usesTexCoord0 = false;
+  this.usesTexCoord1 = false;
+  this.usesVertexColor = false;
+  this.usesFeatureId0 = false;
+  this.usesFeatureId1 = false;
 }
 
 function CustomShaderInfo() {
