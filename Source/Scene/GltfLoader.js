@@ -29,6 +29,7 @@ import ResourceCache from "./ResourceCache.js";
 import ResourceLoader from "./ResourceLoader.js";
 import ResourceLoaderState from "./ResourceLoaderState.js";
 import SupportedImageFormats from "./SupportedImageFormats.js";
+import VertexAttributeSemantic from "./VertexAttributeSemantic.js";
 
 var Attribute = ModelComponents.Attribute;
 var Indices = ModelComponents.Indices;
@@ -63,7 +64,7 @@ var GltfLoaderState = {
  * Implements the {@link ResourceLoader} interface.
  * </p>
  *
- * @alias GltfLoaderfunction Texture
+ * @alias GltfLoader
  * @constructor
  * @augments ResourceLoader
  *
@@ -423,11 +424,12 @@ function getDefault(MathType) {
   return new MathType(); // defaults to 0.0 for all types
 }
 
-function createAttribute(gltf, accessorId, semantic, setIndex) {
+function createAttribute(gltf, accessorId, name, semantic, setIndex) {
   var accessor = gltf.accessors[accessorId];
   var MathType = AttributeType.getMathType(accessor.type);
 
   var attribute = new Attribute();
+  attribute.name = name;
   attribute.semantic = semantic;
   attribute.setIndex = setIndex;
   attribute.constant = getDefault(MathType);
@@ -443,34 +445,24 @@ function createAttribute(gltf, accessorId, semantic, setIndex) {
   return attribute;
 }
 
-function getSemanticAndSetIndex(gltfSemantic) {
-  var setIndexRegex = /_?(\w+)_(\d+)$/;
+function getSetIndex(gltfSemantic) {
+  var setIndexRegex = /^\w+_(\d+)$/;
   var setIndexMatch = setIndexRegex.exec(gltfSemantic);
   if (setIndexMatch !== null) {
-    // Example: _FEATURE_ID_0 is split into FEATURE_ID and 0 (preceding underscore is removed)
-    var semantic = setIndexMatch[1];
-    var setIndex = setIndexMatch[2];
-    if (defined(AttributeSemantic[semantic])) {
-      return {
-        semantic: semantic,
-        setIndex: setIndex,
-      };
-    }
+    return parseInt(setIndexMatch[1]);
   }
-  return {
-    semantic: gltfSemantic,
-  };
+  return undefined;
 }
 
 function loadVertexAttribute(loader, gltf, accessorId, gltfSemantic, draco) {
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
-  var semanticAndSetIndex = getSemanticAndSetIndex(gltfSemantic);
-  var semantic = semanticAndSetIndex.semantic;
-  var setIndex = semanticAndSetIndex.index;
+  var name = gltfSemantic;
+  var semantic = VertexAttributeSemantic.fromGltfSemantic(gltfSemantic);
+  var setIndex = defined(semantic) ? getSetIndex(gltfSemantic) : undefined;
 
-  var attribute = createAttribute(gltf, accessorId, semantic, setIndex);
+  var attribute = createAttribute(gltf, accessorId, name, semantic, setIndex);
 
   if (!defined(draco) && !defined(bufferViewId)) {
     return attribute;
@@ -517,10 +509,11 @@ function loadInstancedAttribute(
   var accessor = gltf.accessors[accessorId];
   var bufferViewId = accessor.bufferView;
 
-  var semanticAndSetIndex = getSemanticAndSetIndex(gltfSemantic);
-  var semantic = semanticAndSetIndex.semantic;
-  var setIndex = semanticAndSetIndex.index;
-  var attribute = createAttribute(gltf, accessorId, semantic, setIndex);
+  var name = gltfSemantic;
+  var semantic = InstanceAttributeSemantic.fromGltfSemantic(gltfSemantic);
+  var setIndex = defined(semantic) ? getSetIndex(gltfSemantic) : undefined;
+
+  var attribute = createAttribute(gltf, accessorId, name, semantic, setIndex);
 
   if (!defined(bufferViewId)) {
     return attribute;
@@ -1198,25 +1191,6 @@ function invalidVertexAttributeProperty(property) {
 
   return false;
 }
-
-function lossyVertexAttributeProperty(property) {
-  // WebGL does not support vertex attributes with these types
-  var valueType = property.valueType;
-  return (
-    valueType === MetadataType.UINT32 ||
-    valueType === MetadataType.UINT64 ||
-    valueType === MetadataType.INT32 ||
-    valueType === MetadataType.INT64 ||
-    valueType === MetadataType.FLOAT64
-  );
-}
-
-var attributeTypes = [
-  AttributeType.SCALAR,
-  AttributeType.VEC2,
-  AttributeType.VEC3,
-  AttributeType.VEC4,
-];
 
 function unloadTextures(loader) {
   var textureLoaders = loader._textureLoaders;

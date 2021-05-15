@@ -88,14 +88,20 @@ function Quantization() {
  */
 function Attribute() {
   /**
-   * The attribute semantic. May be a built-in semantic in {@link AttributeSemantic}
-   * or {@link InstanceAttributeSemantic}, or may be a user-defined semantic.
+   * The attribute name.
    * <p>
-   * User-defined semantics (such as semantics that start with an
-   * underscore in glTF) must be ASCII and match the regex [a-zA-Z_][a-zA-Z0-9]*
+   * Must be ASCII characters that match the regex [a-zA-Z_][a-zA-Z0-9]*
    * </p>
    *
    * @type {String}
+   * @private
+   */
+  this.name = undefined;
+
+  /**
+   * The attribute semantic.
+   *
+   * @type {VertexAttributeSemantic|InstanceAttributeSemantic}
    * @private
    */
   this.semantic = undefined;
@@ -105,11 +111,12 @@ function Attribute() {
    * of the following semantics:
    *
    * <ul>
-   *   <li>{@link AttributeSemantic.TEXCOORD}</li>
-   *   <li>{@link AttributeSemantic.COLOR}</li>
-   *   <li>{@link AttributeSemantic.JOINTS}</li>
-   *   <li>{@link AttributeSemantic.WEIGHTS}</li>
-   *   <li>{@link AttributeSemantic.FEATURE_ID}</li>
+   *   <li>{@link VertexAttributeSemantic.TEXCOORD}</li>
+   *   <li>{@link VertexAttributeSemantic.COLOR}</li>
+   *   <li>{@link VertexAttributeSemantic.JOINTS}</li>
+   *   <li>{@link VertexAttributeSemantic.WEIGHTS}</li>
+   *   <li>{@link VertexAttributeSemantic.FEATURE_ID}</li>
+   *   <li>{@link InstanceAttributeSemantic.FEATURE_ID}</li>
    * </ul>
    */
   this.setIndex = undefined;

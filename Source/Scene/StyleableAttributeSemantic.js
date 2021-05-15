@@ -1,4 +1,5 @@
 import defined from "../Core/defined.js";
+import AttributeSemantic from "./AttributeSemantic.js";
 
 /**
  * An enum describing the built-in attribute semantics available for use in the
@@ -15,7 +16,7 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  POSITION: "POSITION",
+  POSITION: AttributeSemantic.POSITION,
 
   /**
    * A vec3 storing the global Cartesian position after transforms are applied.
@@ -36,7 +37,7 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  NORMAL: "NORMAL",
+  NORMAL: AttributeSemantic.NORMAL,
 
   /**
    * A vec3 storing the local tangent before any transforms are applied.
@@ -44,7 +45,7 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  TANGENT: "TANGENT",
+  TANGENT: AttributeSemantic.TANGENT,
 
   /**
    * A vec2 storing the texture coordinates.
@@ -52,7 +53,7 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  TEXCOORD: "TEXCOORD",
+  TEXCOORD: AttributeSemantic.TEXCOORD,
 
   /**
    * A vec4 storing the color.
@@ -60,7 +61,7 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  COLOR: "COLOR",
+  COLOR: AttributeSemantic.COLOR,
 
   /**
    * A float storing the feature ID.
@@ -68,10 +69,10 @@ var StyleableAttributeSemantic = {
    * @type {String}
    * @constant
    */
-  FEATURE_ID: "FEATURE_ID",
+  FEATURE_ID: AttributeSemantic.FEATURE_ID,
 };
 
-function getShaderNameForSemantic(semantic) {
+function getVariableName(semantic) {
   switch (semantic) {
     case StyleableAttributeSemantic.POSITION:
       return "position";
@@ -90,15 +91,15 @@ function getShaderNameForSemantic(semantic) {
   }
 }
 
-StyleableAttributeSemantic.toShaderName = function (semantic, setIndex) {
-  var shaderName = getShaderNameForSemantic(semantic);
+StyleableAttributeSemantic.toVariableName = function (semantic, setIndex) {
+  var shaderName = getVariableName(semantic);
   if (defined(setIndex)) {
     shaderName = shaderName + setIndex;
   }
   return shaderName;
 };
 
-StyleableAttributeSemantic.fromShaderName = function (semantic, setIndex) {
+StyleableAttributeSemantic.fromVariableName = function (semantic, setIndex) {
   var shaderName = getShaderNameForSemantic(semantic);
   if (defined(setIndex)) {
     shaderName = shaderName + setIndex;

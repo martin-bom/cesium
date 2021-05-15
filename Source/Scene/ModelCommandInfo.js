@@ -23,12 +23,20 @@ var StyleEvaluation = {
   EVALUATE_GPU_APPLY_GPU_FRAG: 3,
 };
 
+var INPUT_STRUCT_NAME = "input";
+var ATTRIBUTES_STRUCT_NAME = "attributes";
+var METADATA_STRUCT_NAME = "metadata";
+var UNIFORMS_STRUCT_NAME = "uniforms";
+
+metadata.building.height;
+metadata.height;
+
 function AttributeInfo(options) {
   this.variableName = options.variableName;
   this.semantic = options.semantic;
   this.setIndex = options.setIndex;
 }
-
+// TODO: point cloud vertex attributes need to have names that don't use unicode characters
 function getAttributeInfo(primitive, variableName) {
   // Get the attribute matching the variable name. This could be any attribute
   // in {@link StyleableAttributeSemantic} or a custom attribute.
@@ -316,6 +324,7 @@ function getStyleInfo(model, primitive, featureMetadata, style) {
     if (builtInVariable === "tiles3d_tileset_time") {
       // Styles using tiles3d_tileset_time should be evaluated every frame on the GPU, but not required
       // TODO: swapping the u_time should be done with the property callback thing
+      // TODO: get rid of this and use uniforms instead?
       usesBuiltInTime = true;
       preferGpuStyling = true;
     }
@@ -329,7 +338,7 @@ function getStyleInfo(model, primitive, featureMetadata, style) {
     var semantic = attributeInfo.semantic;
     if (defined(StyleableAttributeSemantic[semantic])) {
       variableSubstitutionMap[attributeInfo.variableName] =
-        "geometry." +
+        INPUT_STRUCT_NAME +
         StyleableAttributeSemantic.toShaderName(
           attributeInfo.semantic,
           attributeInfo.setIndex

@@ -31,12 +31,43 @@ var InstanceAttributeSemantic = {
   SCALE: "SCALE",
 
   /**
-   * Per-vertex feature ID.
+   * Per-instance feature ID.
    *
    * @type {String}
    * @constant
    */
-  FEATURE_ID_0: "FEATURE_ID",
+  FEATURE_ID: "FEATURE_ID",
+};
+
+/**
+ * Gets the instance attribute semantic matching the glTF attribute semantic.
+ *
+ * @returns {InstanceAttributeSemantic} The instance attribute semantic, or undefined if there is no match.
+ *
+ * @private
+ */
+InstanceAttributeSemantic.fromGltfSemantic = function (gltfSemantic) {
+  var semantic = gltfSemantic;
+
+  // Strip the set index from the semantic
+  var setIndexRegex = /^(\w+)_\d+$/;
+  var setIndexMatch = setIndexRegex.exec(gltfSemantic);
+  if (setIndexMatch !== null) {
+    semantic = setIndexMatch[1];
+  }
+
+  switch (semantic) {
+    case "TRANSLATION":
+      return InstanceAttributeSemantic.TRANSLATION;
+    case "ROTATION":
+      return InstanceAttributeSemantic.ROTATION;
+    case "SCALE":
+      return InstanceAttributeSemantic.SCALE;
+    case "_FEATURE_ID":
+      return InstanceAttributeSemantic.FEATURE_ID;
+  }
+
+  return undefined;
 };
 
 export default Object.freeze(InstanceAttributeSemantic);
