@@ -1,5 +1,6 @@
 import Check from "../Core/Check.js";
 import defined from "../Core/defined.js";
+import DeveloperError from "../Core/DeveloperError.js";
 import VertexAttributeSemantic from "./VertexAttributeSemantic.js";
 
 /**
@@ -69,7 +70,7 @@ var InputSemantic = {
   COLOR: "COLOR",
 
   /**
-   * An integer storing the feature ID.
+   * An int storing the feature ID.
    *
    * @type {String}
    * @constant
@@ -140,66 +141,42 @@ function getVertexAttributeSemantic(semantic) {
  * An object containing information about the input semantic.
  *
  * @typedef {Object} InputSemanticInfo
- * @property {InputSemantic} inputSemantic The input semantic.
+ * @property {InputSemantic} semantic The input semantic.
  * @property {VertexAttributeSemantic} vertexAttributeSemantic The vertex attribute semantic that the input semantic is derived from.
  * @property {Number} [setIndex] The optional set index.
  * @private
  */
 
 /**
- * Converts the input semantic to a shader variable.
- *
- * @param {InputSemanticInfo} inputSemanticInfo An object containing information about the input semantic.
- *
- * @returns {String} The shader variable.
- *
- * @private
- */
-InputSemantic.toShaderVariable = function (inputSemanticInfo) {
-  //>>includeStart('debug', pragmas.debug);
-  Check.typeOf.object("inputSemanticInfo", inputSemanticInfo);
-  //>>includeEnd('debug');
-
-  var semantic = inputSemanticInfo.semantic;
-  var setIndex = inputSemanticInfo.setIndex;
-
-  var shaderVariable = semanticToVariableName(semantic);
-  if (defined(setIndex)) {
-    shaderVariable += setIndex;
-  }
-  return shaderVariable;
-};
-
-/**
- * Gets the input semantic from the shader variable. Example matches include:
+ * Gets the input semantic for the given variable name. Example matches include:
  *
  * <ul>
- * <li>input.position</li>
- * <li>input.positionAbsolute</li>
- * <li>input.featureId</li>
- * <li>input.featureId0</li>
- * <li>input.featureId1</li>
+ * <li>position</li>
+ * <li>positionAbsolute</li>
+ * <li>featureId</li>
+ * <li>featureId0</li>
+ * <li>featureId1</li>
  * </ul>
  *
- * @param {String} shaderVariable The shader variable.
+ * @param {String} name The variable name.
  *
  * @returns {InputSemanticInfo|undefined} An object containing information about the input semantic, or undefined if there is no match.
  *
  * @private
  */
-InputSemantic.fromShaderVariable = function (shaderVariable) {
+InputSemantic.fromVariableName = function (variableName) {
   //>>includeStart('debug', pragmas.debug);
-  Check.typeOf.string("shaderVariable", shaderVariable);
+  Check.typeOf.string("variableName", variableName);
   //>>includeEnd('debug');
 
   var regex = /([a-zA-Z_]+)(\d*)/;
-  var match = regex.exec(shaderVariable);
+  var match = regex.exec(name);
 
   if (match === null) {
     return;
   }
 
-  var variableName = match[1];
+  variableName = match[1];
   var semantic = variableNameToSemantic(variableName);
   if (!defined(semantic)) {
     return;
@@ -224,7 +201,7 @@ InputSemantic.fromShaderVariable = function (shaderVariable) {
 };
 
 /**
- * Gets the input semantic from the style variable. Example matches include:
+ * Gets the input semantic for the given enum name. Example matches include:
  *
  * <ul>
  * <li>POSITION</li
@@ -234,19 +211,19 @@ InputSemantic.fromShaderVariable = function (shaderVariable) {
  * <li>FEATURE_ID_1</li>
  * </ul>
  *
- * @param {String} styleVariable The style variable.
+ * @param {String} enumName The enum name.
  *
- * @returns {InputSemanticInfo} An object containing information about the input semantic, or undefined if there is no match.
+ * @returns {InputSemanticInfo|undefined} An object containing information about the input semantic, or undefined if there is no match.
  *
  * @private
  */
-InputSemantic.fromStyleVariable = function (styleVariable) {
+InputSemantic.fromEnumName = function (enumName) {
   //>>includeStart('debug', pragmas.debug);
-  Check.typeOf.string("styleVariable", styleVariable);
+  Check.typeOf.string("enumName", enumName);
   //>>includeEnd('debug');
 
   var regex = /([a-zA-Z_]+)(_(\d+))?/;
-  var match = regex.exec(styleVariable);
+  var match = regex.exec(enumName);
 
   if (match === null) {
     return;
@@ -276,7 +253,7 @@ InputSemantic.fromStyleVariable = function (styleVariable) {
 };
 
 /**
- * Converts the input semantic to a shader type.
+ * Gets the shader type for the given input semantic.
  *
  * @param {InputSemantic} semantic The input semantic.
  *
@@ -284,7 +261,7 @@ InputSemantic.fromStyleVariable = function (styleVariable) {
  *
  * @private
  */
-InputSemantic.toShaderType = function (semantic) {
+InputSemantic.getShaderType = function (semantic) {
   //>>includeStart('debug', pragmas.debug);
   Check.typeOf.string("semantic", semantic);
   //>>includeEnd('debug');
@@ -301,8 +278,35 @@ InputSemantic.toShaderType = function (semantic) {
       return "vec4";
     case InputSemantic.FEATURE_ID:
       return "int";
+    //>>includeStart('debug', pragmas.debug);
     default:
-      return undefined;
+      throw new DeveloperError("semantic is not a valid value.");
+    //>>includeEnd('debug');
+  }
+};
+
+/**
+ * Gets the variable name for the given input semantic info.
+ *
+ * @param {InputSemanticInfo} inputSemanticInfo An object containing information about the input semantic.
+ *
+ * @returns {String} The variable name.
+ *
+ * @private
+ */
+InputSemantic.getVariableName = function (inputSemanticInfo) {
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.object("inputSemanticInfo", inputSemanticInfo);
+  //>>includeEnd('debug');
+
+  var semantic = inputSemanticInfo.semantic;
+  var setIndex = inputSemanticInfo.setIndex;
+
+  var variableName = semanticToVariableName(semantic);
+  if (defined(setIndex)) {
+    variableName += setIndex;
+  }
+  return variableName;
 };
 
 export default Object.freeze(InputSemantic);

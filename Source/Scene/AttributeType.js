@@ -104,11 +104,11 @@ AttributeType.getMathType = function (attributeType) {
 };
 
 /**
- * Gets the GLSL type for the given attribute type and component datatype.
+ * Gets the shader type for the given attribute type and component datatype.
  *
  * @param {AttributeType} attributeType The attribute type.
  * @param {ComponentDatatype} componentDatatype The component datatype.
- * @returns {String} The GLSL type.
+ * @returns {String} The shader type.
  *
  * @private
  */

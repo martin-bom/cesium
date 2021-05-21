@@ -387,6 +387,13 @@ MetadataClassProperty.prototype.packVectorTypes = function (value) {
   return value;
 };
 
+/**
+ * Gets the shader type for the property.
+ *
+ * @returns {String} The shader type.
+ *
+ * @private
+ */
 MetadataClassProperty.prototype.getShaderType = function () {
   var type = this._type;
   var valueType = this._valueType;
