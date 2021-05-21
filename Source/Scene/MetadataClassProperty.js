@@ -387,6 +387,33 @@ MetadataClassProperty.prototype.packVectorTypes = function (value) {
   return value;
 };
 
+MetadataClassProperty.prototype.getShaderType = function () {
+  var type = this._type;
+  var valueType = this._valueType;
+
+  // TODO: some types are converted to floats - see the per-point properties in NewModel
+  if (type !== MetadataType.ARRAY) {
+    if (MetadataType.isIntegerType(valueType)) {
+      return "int"; // No uint type in WebGL 1.0
+    } else if (MetadataType.isFloatingPointType(valueType)) {
+      return "float";
+    }
+    return undefined;
+  }
+
+  var componentCount = this._componentCount;
+  if (componentCount > 4) {
+    return undefined;
+  }
+
+  var vectorPrefix = "";
+  if (MetadataType.isIntegerType(valueType)) {
+    vectorPrefix = "i";
+  }
+
+  return vectorPrefix + "vec" + componentCount;
+};
+
 /**
  * Validates whether the given value conforms to the property.
  *

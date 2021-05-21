@@ -2,99 +2,450 @@ import Cartesian3 from "../Core/Cartesian3.js";
 import Cartesian4 from "../Core/Cartesian4.js";
 import defaultValue from "../Core/defaultValue.js";
 import defined from "../Core/defined.js";
+import DeveloperError from "../Core/DeveloperError.js";
 import Matrix3 from "../Core/Matrix3.js";
 import oneTimeWarning from "../Core/oneTimeWarning.js";
 import PrimitiveType from "../Core/PrimitiveType.js";
+import RuntimeError from "../Core/RuntimeError.js";
 import AlphaMode from "./AlphaMode.js";
 import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
 import Expression from "./Expression.js";
+import InputSemantic from "./InputSemantic.js";
 import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 import MetadataType from "./MetadataType.js";
 import StyleableAttributeSemantic from "./StyleableAttributeSemantic.js";
+import VertexAttributeSemantic from "./VertexAttributeSemantic.js";
 
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));
 var CARTESIAN4_ONE = Object.freeze(new Cartesian4(1.0, 1.0, 1.0, 1.0));
 
-var StyleEvaluation = {
-  EVALUATE_CPU_APPLY_GPU_VERT: 0,
-  EVALUATE_CPU_APPLY_GPU_FRAG: 1,
-  EVALUATE_GPU_APPLY_GPU_VERT: 2,
-  EVALUATE_GPU_APPLY_GPU_FRAG: 3,
-};
-
-var INPUT_STRUCT_NAME = "input";
-var ATTRIBUTES_STRUCT_NAME = "attributes";
-var METADATA_STRUCT_NAME = "metadata";
-var UNIFORMS_STRUCT_NAME = "uniforms";
-
-metadata.building.height;
-metadata.height;
-
-function AttributeInfo(options) {
-  this.variableName = options.variableName;
-  this.semantic = options.semantic;
-  this.setIndex = options.setIndex;
-}
-// TODO: point cloud vertex attributes need to have names that don't use unicode characters
-function getAttributeInfo(primitive, variableName) {
-  // Get the attribute matching the variable name. This could be any attribute
-  // in {@link StyleableAttributeSemantic} or a custom attribute.
-  var semantic;
-  var setIndex;
-
-  var setIndexRegex = /(\w+)_(\d+)$/;
-  var setIndexMatch = setIndexRegex.exec(variableName);
-  if (setIndexMatch !== null) {
-    // Example: FEATURE_ID_0 is split into FEATURE_ID and 0
-    semantic = setIndexMatch[1];
-    setIndex = setIndexMatch[2];
-  } else {
-    semantic = variableName;
-  }
-
-  var attributes = primitive.attributes;
-  var attributesLength = attributes.length;
-  var hasPositionAttribute = false;
-  for (var i = 0; i < attributesLength; ++i) {
-    var attribute = attributes[i];
-    if (attribute.semantic === semantic && attribute.setIndex === setIndex) {
-      return new AttributeInfo({
-        variableName: variableName,
-        semantic: semantic,
-        setIndex: setIndex,
-      });
-    }
-    if (semantic === AttributeSemantic.POSITION) {
-      hasPositionAttribute = true;
-    }
-  }
-
-  if (
-    hasPositionAttribute &&
-    semantic === StyleableAttributeSemantic.POSITION_ABSOLUTE
-  ) {
-    return new AttributeInfo({
-      variableName: variableName,
-      semantic: semantic,
-    });
-  }
-
-  // No attribute found
-  return undefined;
-}
-
 function PropertyInfo(options) {
-  this.variableName = options.variableName;
   this.propertyId = options.propertyId;
   this.classProperty = options.classProperty;
-  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
-  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
-  this.featureTableId = options.featureTableId;
+  this.featureTableId = options.featureTableId; // TODO: which of these are needed?
   this.featureTextureId = options.featureTextureId;
   this.tileMetadata = options.tileMetadata;
   this.groupMetadata = options.groupMetadata;
   this.tilesetMetadata = options.tilesetMetadata;
+  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
+  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
+  this.requireFragmentShaderStyling = defaultValue(
+    options.requireFragmentShaderStyling,
+    false
+  );
+  this.requireVertexShaderStyle = defaultValue(
+    options.requireVertexShaderShaderStyling,
+    false
+  );
+}
+
+function StyleInfo(options) {
+  this.inputs = options.inputs;
+  this.attributes = options.attributes;
+  this.uniforms = options.uniforms;
+  this.properties = options.properties;
+  this.attributeNameMap = options.attributeNameMap;
+  this.uniformNameMap = options.uniformNameMap;
+  this.propertyNameMap = options.propertyNameMap;
+  this.colorShaderFunction = options.colorShaderFunction;
+  this.showShaderFunction = options.showShaderFunction;
+  this.pointSizeShaderFunction = options.pointSizeShaderFunction;
+  this.requireCpuStyling = defaultValue(options.requireCpuStyling, false);
+  this.requireGpuStyling = defaultValue(options.requireGpuStyling, false);
+  this.requireFragmentShaderStyling = defaultValue(
+    options.requireFragmentShaderStyling,
+    false
+  );
+  this.requireVertexShaderShaderStyling = defaultValue(
+    options.requireVertexShaderStyling,
+    false
+  );
+}
+
+// function getFunctionHeader(functionName) {
+//   return (
+//     functionName +
+//     "(Input input, Attribute attribute, Uniform uniform, Property property)"
+//   );
+// }
+
+function getOutputStruct() {
+  return (
+    "struct Output\n" +
+    "{\n" +
+    "    vec4 color;\n" +
+    "    bool show;\n" +
+    "    float pointSize;\n" +
+    "};\n"
+  );
+}
+
+function getCustomShaderFunction(customShader) {
+  return (
+    "void customShader(Input input, Attribute attribute, Uniform uniform, Property property, Output output)\n" +
+    "{\n" +
+    customShader +
+    "\n" +
+    "}\n" +
+    +"\n" +
+    "Output executeCustomShader(Input input, Attribute attribute, Uniform uniform, Property property)\n" +
+    "{\n" +
+    "    Output output = Output(vec4(1.0), true, 1.0);\n" +
+    "    customShader(input, attribute, uniform, property, output);\n" +
+    "    return output;\n" +
+    "}\n"
+  );
+}
+
+function getStructDefinition(structName, propertyDefinitions) {
+  var propertyDefinitionsLength = propertyDefinitions.length;
+  if (propertyDefinitionsLength === 0) {
+    // Create empty placeholder struct
+    return "struct " + structName + "\n{\nfloat empty;\n};";
+  }
+
+  var struct = "struct " + structName + "\n{\n";
+  for (var i = 0; i < propertyDefinitionsLength; ++i) {
+    struct += propertyDefinitions[i];
+    if (i < propertyDefinitionsLength - 1) {
+      struct += ",";
+    }
+    struct += "\n";
+  }
+  struct += "};";
+
+  return struct;
+}
+
+// TODO: how to handle type conversions - e.g. in a custom shader or style multiplying an int property by a float property
+// TODO: support enums in custom shader
+
+function getShaderTypeFromUniformValue(uniformValue) {
+  var type = typeof uniformValue;
+  if (type === "number") {
+    return "float";
+  } else if (type === "boolean") {
+    return "bool";
+  } else if (uniformValue instanceof Cartesian2) {
+    return "vec2";
+  } else if (uniformValue instanceof Cartesian3) {
+    return "vec3";
+  } else if (uniformValue instanceof Cartesian4) {
+    return "vec4";
+  } else if (uniformValue instanceof Matrix2) {
+    return "mat2";
+  } else if (uniformValue instanceof Matrix3) {
+    return "mat3";
+  } else if (uniformValue instanceof Matrix4) {
+    return "mat4";
+  } else if (uniformValue instanceof Texture) {
+    return "sampler2D";
+  } else if (uniformValue instanceof CubeMap) {
+    return "samplerCube";
+  }
+  // TODO: error
+}
+
+function getStructDefinitions(
+  inputs,
+  attributes,
+  uniforms,
+  properties,
+  attributeNameMap,
+  uniformNameMap,
+  propertyNameMap
+) {
+  var inputDefinitions = inputs.map(function (input) {
+    var type = InputSemantic.toShaderType(input.semantic);
+    var name = InputSemantic.toShaderVariable(input);
+    return type + " " + name;
+  });
+  var inputStruct = getStructDefinition("Input", inputDefinitions);
+
+  var attributeDefinitions = attributes.map(function (attribute) {
+    // TODO: should this be the quantization type or the regular type?
+    var type = AttributeType.getShaderType(
+      attribute.type,
+      attribute.componentDatatype
+    );
+    var name = attributeNameMap[attribute.name];
+    return type + " " + name;
+  });
+  var attributeStruct = getStructDefinition("Attribute", attributeDefinitions);
+
+  var uniformDefinitions = [];
+  for (var uniformName in uniforms) {
+    if (uniforms.hasOwnProperty(uniformName)) {
+      var uniformValue = uniforms[uniformName];
+      var type = getShaderTypeFromUniformValue(uniformValue);
+      var name = uniformNameMap[uniformName];
+      uniformDefinitions.push(type + " " + name);
+    }
+  }
+  var uniformStruct = getStructDefinition("Uniform", uniformDefinitions);
+
+  var propertyDefinitions = properties.map(function (propertyInfo) {
+    var type = propertyInfo.classProperty.getShaderType();
+    var name = propertyNameMap[propertyInfo.propertyId];
+    return type + " " + name;
+  });
+
+  var propertyStruct = getStructDefinition("Property", propertyDefinitions);
+
+  var outputStruct = getOutputStruct();
+
+  return (
+    inputStruct +
+    "\n" +
+    attributeStruct +
+    "\n" +
+    uniformStruct +
+    "\n" +
+    propertyStruct +
+    "\n" +
+    outputStruct
+  );
+}
+
+// TODO: decided not to do scoping yet
+
+function getAttributeWithSemantic(primitive, semantic, setIndex) {
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  for (var i = 0; i < attributesLength; ++i) {
+    var attribute = attributes[i];
+    if (attribute.semantic === semantic && attribute.setIndex === setIndex) {
+      return attribute;
+    }
+  }
+  return undefined;
+}
+
+function getAttributeWithName(primitive, name) {
+  var attributes = primitive.attributes;
+  var attributesLength = attributes.length;
+  for (var i = 0; i < attributesLength; ++i) {
+    var attribute = attributes[i];
+    if (attribute.name === name) {
+      return attribute;
+    }
+  }
+  return undefined;
+}
+
+function getAttributesUsedInShader(primitive, shader) {
+  var attributes = [];
+
+  var regex = /input\.(\w+)/;
+  var match = regex.exec(shader);
+
+  while (match !== null) {
+    var inputSemanticName = match[1];
+    var inputSemanticInfo = InputSemantic.fromShaderVariable(inputSemanticName);
+    if (defined(inputSemanticInfo)) {
+      var semantic = inputSemanticInfo.vertexAttributeSemantic;
+      var setIndex = inputSemanticInfo.setIndex;
+      var attribute = getAttributeWithSemantic(primitive, semantic, setIndex);
+      if (defined(attribute) && attributes.indexOf(attribute) === -1) {
+        attributes.push(attribute);
+      }
+    }
+    match = regex.exec(shader);
+  }
+
+  regex = /attribute\.(\w+)/;
+  match = regex.exec(shader);
+
+  while (match !== null) {
+    var attributeName = match[1];
+    var attribute = getAttributeWithName(primitive, attributeName);
+    if (defined(attribute) && attributes.indexOf(attribute) === -1) {
+      attributes.push(attribute);
+    }
+    match = regex.exec(shader);
+  }
+
+  return attributes;
+}
+
+function getPropertyInfoFromFeatureTable(featureTable, propertyName) {
+  if (
+    !featureTable.propertyExistsBySemantic(propertyName) &&
+    !featureTable.propertyExists(propertyName)
+  ) {
+    return undefined;
+  }
+
+  if (defined(featureTable.class)) {
+    var classProperty = getClassProperty(featureTable.class, propertyName);
+    if (defined(classProperty)) {
+      // Requires CPU styling if the property is a string, variable-size
+      // array, or fixed-size array with more than 4 components
+      return new PropertyInfo({
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        featureTableId: featureTableId,
+      });
+    }
+  }
+
+  // Requires CPU styling if the property is a JSON property or batch
+  // table hierarchy property
+  return new PropertyInfo({
+    variable: variable,
+    requireCpuStyling: true,
+    propertyId: classProperty.id,
+    classProperty: classProperty,
+    featureTableId: featureTableId,
+  });
+}
+
+function getPropertyInfo(content, primitive, featureMetadata, propertyName) {
+  var i;
+  var featureTableId;
+  var featureTable;
+  var propertyInfo;
+  var classProperty;
+
+  // Check if the property exists in a feature table referenced by a feature ID attribute
+  var featureIdAttributes = primitive.featureIdAttributes;
+  var featureIdAttributesLength = featureIdAttributes.length;
+  for (i = 0; i < featureIdAttributesLength; ++i) {
+    var featureIdAttribute = featureIdAttributes[i];
+    featureTableId = featureIdAttribute.featureTableId;
+    featureTable = featureMetadata.getFeatureTable(featureTableId);
+    propertyInfo = getPropertyInfoFromFeatureTable(featureTable, propertyName);
+    if (defined(propertyInfo)) {
+      // Requires GPU styling if the model has per-point or per-vertex features
+      // since this data is transferred to the GPU and generally impractical
+      // to style on the CPU efficiently. This could change in the future with
+      // vector data point features.
+      var hasPerVertexMetadata = featureIdAttribute.divisor === 1;
+      propertyInfo.requireGpuStyling = hasPerVertexMetadata;
+      propertyInfo.requireFragmentShaderStyling =
+        hasPerVertexMetadata &&
+        primitive.primitiveType !== PrimitiveType.POINTS;
+      return propertyInfo;
+    }
+  }
+
+  // Check if the property exists in a feature table referenced by a feature ID texture
+  var featureIdTextures = primitive.featureIdTextures;
+  var featureIdTexturesLength = featureIdTextures.length;
+  for (i = 0; i < featureIdTexturesLength; ++i) {
+    var featureIdTexture = featureIdTextures[i];
+    featureTableId = featureIdTexture.featureTableId;
+    featureTable = featureMetadata.getFeatureTable(featureTableId);
+    propertyInfo = getPropertyInfoFromFeatureTable(featureTable, propertyName);
+    if (defined(propertyInfo)) {
+      propertyInfo.requireFragmentShaderStyling = true;
+      return propertyInfo;
+    }
+  }
+
+  // Check if the property exists in a feature texture
+  var featureTextureIds = primitive.featureTextureIds;
+  var featureTextureIdsLength = featureTextureIds.length;
+  for (i = 0; i < featureTextureIdsLength; ++i) {
+    var featureTextureId = featureTextureIds[i];
+    var featureTexture = featureMetadata.getFeatureTexture(featureTextureId);
+    classProperty = getClassProperty(featureTexture.class, variable);
+    if (defined(classProperty)) {
+      return new PropertyInfo({
+        variable: variable,
+        requireGpuStyling: true,
+        requireFragmentShaderStyling: true,
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        featureTextureId: featureTextureId,
+      });
+    }
+  }
+
+  if (!defined(content)) {
+    // The rest of the checks are for tile, group, and tileset metadata so
+    // return early if this model isn't part of a 3D Tileset
+    return undefined;
+  }
+
+  // Check if the property exists in tile metadata
+  var tileMetadata = content.tile.metadata;
+  if (defined(tileMetadata)) {
+    classProperty = getClassProperty(tileMetadata.class, variable);
+    if (defined(classProperty)) {
+      return new PropertyInfo({
+        variable: variable,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        tileMetadata: tileMetadata,
+      });
+    }
+  }
+
+  // Check if the property exists in group metadata
+  var groupMetadata = content.groupMetadata;
+  if (defined(groupMetadata)) {
+    classProperty = getClassProperty(groupMetadata.class, variable);
+    if (defined(classProperty)) {
+      return new PropertyInfo({
+        variable: variable,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        groupMetadata: groupMetadata,
+      });
+    }
+  }
+
+  // Check if the property exists in tileset metadata
+  var tilesetMetadata = content.tileset.metadata;
+  if (defined(tilesetMetadata) && defined(tilesetMetadata.tileset)) {
+    classProperty = getClassProperty(groupMetadata.class, variable);
+    if (defined(classProperty)) {
+      return new PropertyInfo({
+        variable: variable,
+        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
+        propertyId: classProperty.id,
+        classProperty: classProperty,
+        groupMetadata: tilesetMetadata,
+      });
+    }
+  }
+
+  // Could not find property with a matching propertyId or semantic
+  return undefined;
+}
+
+function getPropertiesUsedInShader(primitive, shader) {
+  var properties = [];
+
+  var regex = /property\.(\w+)/;
+  var match = regex.exec(shader);
+
+  while (match !== null) {
+    var propertyName = match[1];
+    var propertyInfo = getPropertyInfo(
+      content,
+      primitive,
+      featureMetadata,
+      propertyName
+    );
+    if (defined(propertyInfo)) {
+      properties.push(propertyInfo);
+    }
+
+    match = regex.exec(shader);
+  }
+
+  return properties;
+}
+
+function getCustomShaderInfo() {
+  // TODO: make sure to replace occurrences of "featureId" with "featureId0"
+  // since that's what the input struct will have
 }
 
 function isPropertyGpuCompatible(classProperty) {
@@ -116,168 +467,297 @@ function isPropertyGpuCompatible(classProperty) {
   return true;
 }
 
-function getClassProperty(classDefinition, variableName) {
-  var classProperties = classDefinition.properties;
+function getClassProperty(classDefinition, variable) {
   var classPropertiesBySemantic = classDefinition.propertiesBySemantic;
+  var classProperties = classDefinition.properties;
   return defaultValue(
-    classPropertiesBySemantic[variableName],
-    classProperties[variableName]
+    classPropertiesBySemantic[variable],
+    classProperties[variable]
   );
 }
 
-function getPropertyInfo(content, primitive, featureMetadata, variableName) {
-  var i;
-  var classProperty;
-
-  // Check if the property exists in a feature table
-  var featureIdAttributes = primitive.featureIdAttributes;
-  var featureIdAttributesLength = featureIdAttributes.length;
-
-  for (i = 0; i < featureIdAttributesLength; ++i) {
-    var featureIdAttribute = featureIdAttributes[i];
-    var featureTableId = featureIdAttribute.featureTableId;
-    var featureTable = featureMetadata.getFeatureTable(featureTableId);
-    if (
-      featureTable.propertyExistsBySemantic(variableName) ||
-      featureTable.propertyExists(variableName)
-    ) {
-      if (defined(featureTable.class)) {
-        classProperty = getClassProperty(featureTable.class, variableName);
-        if (defined(classProperty)) {
-          // Requires CPU styling if the property is a string, variable-size
-          // array, or fixed-size array with more than 4 components
-          return new PropertyInfo({
-            variableName: variableName,
-            requireCpuStyling: !isPropertyGpuCompatible(classProperty),
-            propertyId: classProperty.id,
-            classProperty: classProperty,
-            featureTableId: featureTableId,
-          });
-        }
-      }
-
-      // Requires CPU styling if the property is a JSON property or batch
-      // table hierarchy property
-      return new PropertyInfo({
-        variableName: variableName,
-        requireCpuStyling: true,
-        propertyId: classProperty.id,
-        classProperty: classProperty,
-        featureTableId: featureTableId,
-      });
-    }
+function getGlslName(name, uniqueId) {
+  // If the attribute name is not compatible in GLSL - e.g. has non-alphanumeric
+  // characters like `:`, `-`, `#`, spaces, or unicode - use a placeholder property name
+  var glslCompatibleRegex = /^[a-zA-Z_]\w*$/;
+  if (glslCompatibleRegex.test(name)) {
+    return name;
   }
-
-  // Check if the property exists in a feature texture
-  var featureTextureIds = primitive.featureTextureIds;
-  var featureTextureIdsLength = featureTextureIds.length;
-
-  for (i = 0; i < featureTextureIdsLength; ++i) {
-    var featureTextureId = featureTextureIds[i];
-    var featureTexture = featureMetadata.getFeatureTexture(featureTextureId);
-    classProperty = getClassProperty(featureTexture.class, variableName);
-    if (defined(classProperty)) {
-      // Feature textures require GPU styling
-      return new PropertyInfo({
-        variableName: variableName,
-        requireGpuStyling: true,
-        propertyId: classProperty.id,
-        classProperty: classProperty,
-        featureTextureId: featureTextureId,
-      });
-    }
-  }
-
-  // Check if the property exists in tile metadata
-  var tileMetadata = content.tile.metadata;
-  if (defined(tileMetadata)) {
-    classProperty = getClassProperty(tileMetadata.class, variableName);
-    if (defined(classProperty)) {
-      return new PropertyInfo({
-        variableName: variableName,
-        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
-        propertyId: classProperty.id,
-        classProperty: classProperty,
-        tileMetadata: tileMetadata,
-      });
-    }
-  }
-
-  // Check if the property exists in group metadata
-  var groupMetadata = content.groupMetadata;
-  if (defined(groupMetadata)) {
-    classProperty = getClassProperty(groupMetadata.class, variableName);
-    if (defined(classProperty)) {
-      return new PropertyInfo({
-        variableName: variableName,
-        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
-        propertyId: classProperty.id,
-        classProperty: classProperty,
-        groupMetadata: groupMetadata,
-      });
-    }
-  }
-
-  // Check if the property exists in tileset metadata
-  var tilesetMetadata = content.tileset.metadata;
-  if (defined(tilesetMetadata) && defined(tilesetMetadata.tileset)) {
-    classProperty = getClassProperty(groupMetadata.class, variableName);
-    if (defined(classProperty)) {
-      return new PropertyInfo({
-        variableName: variableName,
-        requireCpuStyling: !isPropertyGpuCompatible(classProperty),
-        propertyId: classProperty.id,
-        classProperty: classProperty,
-        groupMetadata: tilesetMetadata,
-      });
-    }
-  }
-
-  // Could not find property with a matching propertyId or semantic
-  return undefined;
+  return "czm_style_variable_" + uniqueId;
 }
 
-function getStyleInfo(model, primitive, featureMetadata, style) {
-  var i;
-  var propertyInfo;
+function parseVariableAsProperty(
+  variable,
+  variableId,
+  primitive,
+  featureMetadata,
+  properties,
+  variableSubstitutionMap,
+  propertyNameMap
+) {
+  if (!defined(featureMetadata)) {
+    return false;
+  }
 
-  var requireCpuStyling = false; // Style must be evaluated on the CPU
-  var requireGpuStyling = false; // Style must be evaluated on the GPU
-  var preferGpuStyling = false; // Prefer evaluating the style on the GPU
-  var usesBuiltInTime = false; // Uses tiles3d_tileset_time
+  var propertyInfo = getPropertyInfo(
+    content,
+    primitive,
+    featureMetadata,
+    variable
+  );
 
-  // Separate variables into attributes, properties, undefined variables, and built-in variables
-  var styleVariables = style.getVariables();
-  var variableNames = styleVariables.variables;
+  if (!defined(propertyInfo)) {
+    return false;
+  }
+
+  var propertyExists = false;
+  var propertiesLength = properties.length;
+  for (var i = 0; i < propertiesLength; ++i) {
+    if (properties[i].propertyId === propertyInfo.propertyId) {
+      propertyExists = true;
+      break;
+    }
+  }
+
+  if (propertyExists) {
+    // Already saw this property
+    return true;
+  }
+
+  properties.push(propertyInfo);
+
+  var propertyName = getGlslName(propertyInfo.propertyId, variableId);
+  propertyNameMap[propertyName] = variable;
+  variableSubstitutionMap[variable] = "property." + propertyName;
+
+  return true;
+}
+
+function parseVariableAsUniform(
+  variable,
+  variableId,
+  uniforms,
+  uniformMap,
+  variableSubstitutionMap,
+  uniformNameMap
+) {
+  if (!defined(uniformMap[variable])) {
+    return false;
+  }
+
+  if (defined(uniforms[variable])) {
+    // Already saw this uniform
+    return true;
+  }
+
+  uniforms[variable] = uniformMap[variable];
+
+  var uniformName = getGlslName(variable, variableId);
+  uniformNameMap[uniformName] = variable;
+  variableSubstitutionMap[variable] = "uniform." + uniformName;
+
+  return true;
+}
+
+function parseVariableAsAttribute(
+  variable,
+  variableId,
+  primitive,
+  attributes,
+  variableSubstitutionMap,
+  attributeNameMap
+) {
+  var attribute = getAttributeWithName(primitive, variable);
+  if (!defined(attribute)) {
+    return false;
+  }
+
+  if (attributes.indexOf(attribute) !== -1) {
+    // Already saw this attribute
+    return true;
+  }
+
+  attributes.push(attribute);
+
+  var attributeName = getGlslName(attribute.name, variableId);
+  attributeNameMap[attributeName] = variable;
+  variableSubstitutionMap[variable] = "attribute." + attributeName;
+
+  return true;
+}
+
+function parseVariableAsInput(
+  variable,
+  primitive,
+  inputs,
+  attributes,
+  variableSubstitutionMap
+) {
+  var inputSemanticInfo = InputSemantic.fromStyleVariable(variable);
+  if (!defined(inputSemanticInfo)) {
+    inputSemanticInfo = InputSemantic.fromShaderVariable(variable);
+  }
+  if (!defined(inputSemanticInfo)) {
+    return false;
+  }
+
+  var vertexAttributeSemantic = inputSemanticInfo.vertexAttributeSemantic;
+  var setIndex = inputSemanticInfo.setIndex;
+  var attribute = getAttributeWithSemantic(
+    primitive,
+    vertexAttributeSemantic,
+    setIndex
+  );
+
+  if (!defined(attribute)) {
+    return false;
+  }
+
+  var inputExists = false;
+  var inputsLength = inputs.length;
+  for (var i = 0; i < inputsLength; ++i) {
+    if (
+      inputs[i].semantic === inputSemanticInfo.semantic &&
+      inputs[i].setIndex === inputSemanticInfo.setIndex
+    ) {
+      inputExists = true;
+      break;
+    }
+  }
+
+  if (inputExists) {
+    // Already saw this input
+    return true;
+  }
+
+  if (attributes.indexOf(attribute) === -1) {
+    // TODO: need to add to the attributeNameMap?
+    attributes.push(attribute);
+  }
+
+  inputs.push(inputSemanticInfo);
+
+  variableSubstitutionMap[variable] =
+    "input." + InputSemantic.toShaderVariable(inputSemanticInfo);
+
+  return true;
+}
+
+function getStyleInfo(primitive, featureMetadata, style, uniformMap, content) {
+  // Styles may be evaluated on the CPU or GPU depending on the style and the
+  // types of properties involved. On the CPU styles are evaluated per-feature
+  // and the color/show results are stored in a batch texture, which is later
+  // applied on the GPU, either in the vertex shader or fragment shader.
+  // For GPU styling the style is converted to a shader and executed in the
+  // vertex shader or fragment shader directly. CPU styling is preferred.
+  //
+  // In some cases a style may require both CPU styling and GPU styling, in which
+  // case the style can't be applied and an error is thrown.
+
+  // Situations where CPU styling is required:
+  //   * Style uses language features not supported in GLSL like strings or regex
+  //   * Style uses properties that are not GPU compatible like strings, variable-size arrays, or fixed sized arrays with more than 4 components
+  //   * Style uses properties in JsonMetadataTable or BatchTableHierarchy
+  //   * Style uses custom evaluate functions, see {@link Cesium3DTileStyle#color}
+  //   * TODO: meta property
+  //   * TODO: float64, int64, etc
+  var requireCpuStyling = false;
+
+  // Situations where GPU styling is required:
+  //   * Style uses per-point properties. Large point clouds are generally impractical to style on the CPU.
+  //   * Style uses per-vertex properties. Per-vertex properties need to be interpolated before being styled.
+  //   * Style uses feature texture properties
+  //   * Style uses vertex attributes like position, color, etc
+  //   * Style uses uniforms
+  //   * Style references features in different feature tables
+  //   * Point size style is used
+  var requireGpuStyling = false;
+
+  // Situations where the style must be applied in the fragment shader:
+  //   * Primitive uses a feature ID texture
+  //   * Style uses feature texture properties
+  //   * Style uses per-vertex properties
+  //   * Style is evaluated on the CPU and vertex texture fetch is not supported
+  var requireFragmentShaderStyling = false;
+
+  // Situations where the style must be applied in the vertex shader:
+  //   * Point size style is used
+  var requireVertexShaderStyling = false;
+
+  // Sort style variables into various buckets.
+  //
+  // Since style variables aren't scoped there can be name collisions which are
+  // resolved in this order of precedence.
+  //
+  //   1. Input semantics
+  //     a. Semantic form (e.g. POSITION_ABSOLUTE)
+  //     b. Variable form (e.g. positionAbsolute)
+  //   2. Attributes (e.g. _TEMPERATURE)
+  //   3. Uniforms
+  //   4. Properties (for each item below, search by semantic first, then by property ID)
+  //     a. Feature
+  //     b. Tile
+  //     c. Group
+  //     d. Tileset
+  var variables = style.getVariables();
+  var inputs = [];
   var attributes = [];
+  var uniforms = [];
   var properties = [];
-  var undefinedVariableNames = [];
-  var builtInVariables = styleVariables.builtInVariables;
 
-  var variablesLength = variableNames.length;
+  // Build a variable substitution map that maps variable names to shader names
+  var variableSubstitutionMap = {};
+  var attributeNameMap = {};
+  var uniformNameMap = {};
+  var propertyNameMap = {};
+
+  var variablesLength = variables.length;
   for (i = 0; i < variablesLength; ++i) {
-    var variableName = variableNames[i];
-    var attributeInfo = getAttributeInfo(primitive, variableName);
-    if (defined(attributeInfo)) {
-      // This variable refers to a vertex attribute, e.g. ${POSITION}
-      attributes.push(attributeInfo);
+    var variable = variables[i];
+
+    if (
+      parseVariableAsInput(
+        variable,
+        primitive,
+        inputs,
+        attributes,
+        variableSubstitutionMap
+      ) ||
+      parseVariableAsAttribute(
+        variable,
+        i,
+        primitive,
+        attributes,
+        variableSubstitutionMap,
+        attributeNameMap
+      ) ||
+      parseVariableAsUniform(
+        variable,
+        i,
+        uniforms,
+        uniformMap,
+        variableSubstitutionMap,
+        uniformNameMap
+      ) ||
+      parseVariableAsProperty(
+        variable,
+        i,
+        primitive,
+        featureMetadata,
+        properties,
+        variableSubstitutionMap,
+        propertyNameMap
+      )
+    ) {
       continue;
     }
 
-    propertyInfo = getPropertyInfo(
-      model.content,
-      primitive,
-      featureMetadata,
-      variableName
+    // Didn't find a match. The variable will evaluate to null/undefined.
+    // Warn the user about this happening because the style might not work correctly.
+    oneTimeWarning(
+      "Style references a property that does not exist: " + variable
     );
-    if (defined(propertyInfo)) {
-      // This variable refers to a property, e.g. ${Height}
-      properties.push(propertyInfo);
-      continue;
-    }
-
-    // This variable doesn't exist
-    undefinedVariableNames.push(variableName);
+    variableSubstitutionMap[variable] = Expression.NULL_SENTINEL;
   }
 
   var attributesLength = attributes.length;
@@ -286,21 +766,45 @@ function getStyleInfo(model, primitive, featureMetadata, style) {
     requireGpuStyling = true;
   }
 
+  var featureTableIds = [];
   var propertiesLength = properties.length;
-  for (i = 0; i < propertiesLength; ++i) {
+  for (var i = 0; i < propertiesLength; ++i) {
     // Check if properties require CPU or GPU styling
-    propertyInfo = properties[i];
-    requireCpuStyling = requireCpuStyling || propertyInfo.requireCpuStyling;
-    requireGpuStyling = requireGpuStyling || propertyInfo.requireGpuStyling;
+    var propertyInfo = properties[i];
+    if (propertyInfo.requireCpuStyling) {
+      requireCpuStyling = true;
+    }
+    if (propertyInfo.requireGpuStyling) {
+      requireGpuStyling = true;
+    }
+    if (propertyInfo.requireFragmentShaderStyling) {
+      requireFragmentShaderStyling = true;
+    }
+    if (propertyInfo.requireVertexShaderShaderStyling) {
+      requireVertexShaderStyling = true;
+    }
+
+    // Gather the feature table IDs in use
+    var featureTableId = propertyInfo.featureTableId;
+    if (defined(featureTableId)) {
+      if (featureTableIds.indexOf(featureTableId) === -1) {
+        featureTableIds.push(featureTableId);
+      }
+    }
   }
 
-  // Print warning when style references a property that doesn't exist
-  var undefinedVariablesLength = undefinedVariableNames.length;
-  for (i = 0; i < undefinedVariablesLength; ++i) {
-    oneTimeWarning(
-      "Style references a property that does not exist: " +
-        undefinedVariableNames[i]
-    );
+  if (featureTableIds.length > 1) {
+    // If different feature tables are used in the same style the style needs to be
+    // applied on the GPU. It's not possible to compose the colors/shows of
+    // different feature on the CPU in a way that makes sense.
+    requireGpuStyling = true;
+  }
+
+  if (uniforms.length > 0) {
+    // Uniforms only work on the GPU because it's not fast enough to evaluate
+    // styles on the CPU if uniforms are changing every frame (e.g. like a
+    // "time" uniform)
+    requireGpuStyling = true;
   }
 
   var hasColorStyle = defined(style.color);
@@ -309,121 +813,120 @@ function getStyleInfo(model, primitive, featureMetadata, style) {
     defined(style.pointSize) &&
     primitive.primitiveType === PrimitiveType.POINTS;
 
+  if (hasPointSizeStyle) {
+    // Longer term point size could be evaluated on the CPU and sent in as a
+    // vertex attribute, though this is impractical for large point clouds
+    requireGpuStyling = true;
+    requireVertexShaderStyling = true;
+  }
+
+  var hasColorShaderFunction =
+    hasColorStyle && defined(style.color.getShaderFunction);
+  var hasShowShaderFunction =
+    hasShowStyle && defined(style.show.getShaderFunction);
+  var hasPointSizeShaderFunction =
+    hasPointSizeStyle && defined(style.pointSize.getShaderFunction);
+
   if (
-    (hasColorStyle && !defined(style.color.getShaderFunction)) ||
-    (hasShowStyle && !defined(style.show.getShaderFunction)) ||
-    (hasPointSizeStyle && !defined(style.pointSize.getShaderFunction))
+    (hasColorStyle && !hasColorShaderFunction) ||
+    (hasShowStyle && !hasShowShaderFunction) ||
+    (hasPointSizeStyle && !hasPointSizeShaderFunction)
   ) {
     // Styles that uses custom evaluate functions must be evaluated on the CPU.
     requireCpuStyling = true;
   }
 
-  var builtInVariablesLength = builtInVariables.length;
-  for (i = 0; i < builtInVariablesLength; ++i) {
-    var builtInVariable = builtInVariables[i];
-    if (builtInVariable === "tiles3d_tileset_time") {
-      // Styles using tiles3d_tileset_time should be evaluated every frame on the GPU, but not required
-      // TODO: swapping the u_time should be done with the property callback thing
-      // TODO: get rid of this and use uniforms instead?
-      usesBuiltInTime = true;
-      preferGpuStyling = true;
-    }
-  }
-
-  // Build a variable substitution map that converts variable names in the style to shader names
-  var variableSubstitutionMap = {};
-
-  for (i = 0; i < attributesLength; ++i) {
-    var attributeInfo = attributes[i];
-    var semantic = attributeInfo.semantic;
-    if (defined(StyleableAttributeSemantic[semantic])) {
-      variableSubstitutionMap[attributeInfo.variableName] =
-        INPUT_STRUCT_NAME +
-        StyleableAttributeSemantic.toShaderName(
-          attributeInfo.semantic,
-          attributeInfo.setIndex
-        );
-    }
-  }
-
-  for (i = 0; i < propertiesLength; ++i) {
-    propertyInfo = properties[i];
-    var variableName = propertyInfo.variableName;
-    var propertyId = propertyInfo.propertyId;
-    variableSubstitutionMap[variableName] = "properties." + propertyId;
-  }
-
-  for (i = 0; i < undefinedVariablesLength; ++i) {
-    variableSubstitutionMap[undefinedVariableNames[i]] =
-      Expression.NULL_SENTINEL;
-  }
-
-  var builtinPropertyNameMap = {
-    POSITION: "czm_3dtiles_builtin_property_POSITION",
-    POSITION_ABSOLUTE: "czm_3dtiles_builtin_property_POSITION_ABSOLUTE",
-    COLOR: "czm_3dtiles_builtin_property_COLOR",
-    NORMAL: "czm_3dtiles_builtin_property_NORMAL",
+  var shaderState = {
+    translucent: false,
   };
 
-  // var propertyIdMap = {};
+  // Check if the style can be converted to a shader or not. Usually it can't
+  // if the style uses strings or regex.
+  if (!requiresCpuStyling && requireGpuStyling) {
+    var colorShaderFunction;
+    var showShaderFunction;
+    var pointSizeShaderFunction;
 
-  // What to do about default values
+    if (hasColorShaderFunction) {
+      try {
+        colorShaderFunction = style.getColorShaderFunction(
+          getFunctionHeader("getColorFromStyle"),
+          variableSubstitutionMap,
+          shaderState
+        );
+      } catch (error) {
+        requireCpuStyling = true;
+      }
+    }
+    if (hasShowShaderFunction) {
+      try {
+        showShaderFunction = style.getShowShaderFunction(
+          getFunctionHeader("getShowFromStyle"),
+          variableSubstitutionMap,
+          shaderState
+        );
+      } catch (error) {
+        requireCpuStyling = true;
+      }
+    }
+    if (hasPointSizeShaderFunction) {
+      try {
+        pointSizeShaderFunction = style.getPointSizeShaderFunction(
+          getFunctionHeader("getPointSizeFromStyle"),
+          variableSubstitutionMap,
+          shaderState
+        );
+      } catch (error) {
+        requireCpuStyling = true;
+      }
+    }
 
-  // TODO: should style be _FEATURE_ID_0 or FEATURE_ID_0
+    if (!requireCpuStyling) {
+      // Create custom shader from the color, show, and point size shaders
+      var customShader = "";
+      if (defined(colorShaderFunction)) {
+        customShader +=
+          "output.color = getColorForStyle(input, attribute, uniform, property)";
+      }
+      if (defined(
+    }
+  }
 
-  // CPU
-  //     strings, regex, etc
-  //     incompatible properties: string, var-sized arrays, array > 4
-  //     batch table hierarchy
-  //     custom evaluate functions
-  //     what about that meta property?
+  if (!requireGpuStyling) {
+    // If GPU styling is not required prefer CPU styling. CPU styling is
+    // faster if feature properties aren't changing frequently.
+    requireCpuStyling = true;
+  }
 
-  // EVALUATE_CPU_APPLY_GPU_FRAG
-  //     feature id textures
-  //     no vertex-texture-fetch
+  if (requireCpuStyling && ContextLimits.maximumVertexTextureImageUnits === 0) {
+    // The batch texture can only be read in the frag shader
+    requireFragmentShaderStyling = true;
+  }
 
-  // EVALUATE_CPU_APPLY_GPU_VERT
-  //     everything else
+  if (requireCpuStyling && requireGpuStyling) {
+    // TODO: better error message
+    throw new RuntimeError("Invalid style");
+  }
 
-  // GPU
-  //     any situation where Cesium3DTileFeature objects aren't created
-  //       per-point properties
-  //       per-vertex properties (stride 1 basically where vertex interpolation is needed)
-  //     tileset_3dtile_time (but if needs to use the GPU just ignore this)
-  //     feature textures
-  //     uses vertex attributes (position, color, etc)
-  //     styling point size
-  //     multiple feature tables (I think)
-
-  // EVALUATE_GPU_APPLY_GPU_FRAG
-  //     per-vertex properties (stride 1 basically where vertex interpolation is needed)
-  //     feature textures
-  //     using interpolated vertex attributes (position, normal, etc) - non point clouds
-
-  // EVALUATE_GPU_APPLY_GPU_VERT
-  //     everything else
-
-  // always favor CPU
-
-  // NONE
-  //     any case where the two above are the same
-
-  this.useFragmentShading = primitive.primitiveType !== PrimitiveType.POINTS;
-
-  //  var styleShader =
+  return new StyleInfo({
+    requireCpuStyling: requireCpuStyling,
+    requireGpuStyling: requireGpuStyling,
+    requireFragmentShaderStyling: requireFragmentShaderStyling,
+    requireVertexShaderStyling: requireVertexShaderStyling,
+    inputs: inputs,
+    attributes: attributes,
+    uniforms: uniforms,
+    properties: properties,
+    attributeNameMap: attributeNameMap,
+    propertyNameMap: propertyNameMap,
+    colorShaderFunction: colorShaderFunction,
+    showShaderFunction: showShaderFunction,
+    pointSizeShaderFunction: pointSizeShaderFunction,
+    translucent: shaderState.translucent,
+  });
 }
 
-function CustomShaderInfo() {
-  this.usesPosition = false;
-  this.usesPositionAbsolute = false;
-  this.usesNormal = false;
-  this.usesTangent = false;
-  this.usesTexCoord0 = false;
-  this.usesTexCoord1 = false;
-  this.usesVertexColor = false;
-  this.usesFeatureId0 = false;
-  this.usesFeatureId1 = false;
-}
+// TODO: What to do about default values: it should be set on the Property struct elsewhere
 
 function CustomShaderInfo() {
   this.usesPosition = false;
@@ -533,6 +1036,9 @@ function StyleInfo() {
   this.customAttributes = [];
   this.featureProperties = [];
 }
+
+// TODO: custom shaders with utf8 property names (including with spaces)
+// does the user get access to the variable substitution map?
 
 function ModelCommandInfo(node, primitive, context) {
   var customShaderInfo;

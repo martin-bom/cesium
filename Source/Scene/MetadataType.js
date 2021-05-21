@@ -2,7 +2,6 @@ import Check from "../Core/Check.js";
 import ComponentDatatype from "../Core/ComponentDatatype.js";
 import DeveloperError from "../Core/DeveloperError.js";
 import FeatureDetection from "../Core/FeatureDetection.js";
-import AttributeType from "../Scene/AttributeType.js";
 
 /**
  * An enum of metadata types.
@@ -337,6 +336,28 @@ MetadataType.isUnsignedIntegerType = function (type) {
     case MetadataType.UINT16:
     case MetadataType.UINT32:
     case MetadataType.UINT64:
+      return true;
+    default:
+      return false;
+  }
+};
+
+/**
+ * Returns whether the type is a floating point type.
+ *
+ * @param {MetadataType} type The type.
+ * @returns {Boolean} Whether the type is a floating point type.
+ *
+ * @private
+ */
+MetadataType.isFloatingPointType = function (type) {
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.string("type", type);
+  //>>includeEnd('debug');
+
+  switch (type) {
+    case MetadataType.FLOAT32:
+    case MetadataType.FLOAT64:
       return true;
     default:
       return false;

@@ -309,6 +309,7 @@ function getMetadataVertexAttributes(
   featureMetadata,
   frameState
 ) {
+  // TODO: point cloud vertex attributes need to have names that don't use unicode characters
   // Convert per-vertex metadata to vertex buffers. Mainly applicable to point clouds.
   var metadataVertexAttributes = [];
   var featureIdAttributes = primitive.featureIdAttributes;
@@ -321,6 +322,8 @@ function getMetadataVertexAttributes(
     var semantic = featureIdAttribute.semantic;
     var divisor = featureIdAttribute.divisor;
     var constant = featureIdAttribute.constant;
+    // TODO: what about divisor > 1?
+    // TODO: what are the vertex interpolation rules?
     if (defined(semantic) || divisor !== 1) {
       continue;
     }

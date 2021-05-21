@@ -170,8 +170,8 @@ Expression.prototype.evaluateColor = function (feature, result) {
  * Gets the shader function for this expression.
  * Returns undefined if the shader function can't be generated from this expression.
  *
- * @param {String} functionName Name to give to the generated function.
- * @param {String} propertyNameMap Maps property variable names to shader attribute names.
+ * @param {String} functionHeader Header of the generated function.
+ * @param {Object} variableSubstitutionMap Maps variable names to shader names.
  * @param {Object} shaderState Stores information about the generated shader function, including whether it is translucent.
  * @param {String} returnType The return type of the generated function.
  *
@@ -180,18 +180,20 @@ Expression.prototype.evaluateColor = function (feature, result) {
  * @private
  */
 Expression.prototype.getShaderFunction = function (
-  functionName,
-  propertyNameMap,
+  functionHeader,
+  variableSubstitutionMap,
   shaderState,
   returnType
 ) {
-  var shaderExpression = this.getShaderExpression(propertyNameMap, shaderState);
+  var shaderExpression = this.getShaderExpression(
+    variableSubstitutionMap,
+    shaderState
+  );
 
   shaderExpression =
     returnType +
     " " +
-    functionName +
-    "() \n" +
+    functionHeader +
     "{ \n" +
     "    return " +
     shaderExpression +
@@ -205,7 +207,7 @@ Expression.prototype.getShaderFunction = function (
  * Gets the shader expression for this expression.
  * Returns undefined if the shader expression can't be generated from this expression.
  *
- * @param {String} propertyNameMap Maps property variable names to shader attribute names.
+ * @param {Object} variableSubstitutionMap Maps variable names to shader names.
  * @param {Object} shaderState Stores information about the generated shader function, including whether it is translucent.
  *
  * @returns {String} The shader expression.
@@ -213,19 +215,26 @@ Expression.prototype.getShaderFunction = function (
  * @private
  */
 Expression.prototype.getShaderExpression = function (
-  propertyNameMap,
+  variableSubstitutionMap,
   shaderState
 ) {
-  return this._runtimeAst.getShaderExpression(propertyNameMap, shaderState);
+  return this._runtimeAst.getShaderExpression(
+    variableSubstitutionMap,
+    shaderState
+  );
 };
 
 /**
  * Gets the variables used by the expression.
  *
+ * @returns {String[]} The variables used by the expression.
+ *
  * @private
  */
-Expression.prototype.getVariables = function (styleVariables) {
-  this._runtimeAst.getVariables(styleVariables);
+Expression.prototype.getVariables = function () {
+  var variables = [];
+  this._runtimeAst.getVariables(variables);
+  return variables;
 };
 
 var unaryOperators = ["!", "-", "+"];
@@ -1976,12 +1985,17 @@ function colorToVec4(color) {
   return "vec4(" + r + ", " + g + ", " + b + ", " + a + ")";
 }
 
-function getExpressionArray(array, propertyNameMap, shaderState, parent) {
+function getExpressionArray(
+  array,
+  variableSubstitutionMap,
+  shaderState,
+  parent
+) {
   var length = array.length;
   var expressions = new Array(length);
   for (var i = 0; i < length; ++i) {
     expressions[i] = array[i].getShaderExpression(
-      propertyNameMap,
+      variableSubstitutionMap,
       shaderState,
       parent
     );
@@ -1989,8 +2003,8 @@ function getExpressionArray(array, propertyNameMap, shaderState, parent) {
   return expressions;
 }
 
-function getVariableName(variableName, propertyNameMap) {
-  if (!defined(propertyNameMap[variableName])) {
+function getVariableName(variableName, variableSubstitutionMap) {
+  if (!defined(variableSubstitutionMap[variableName])) {
     throw new RuntimeError(
       'Style references a property "' +
         variableName +
@@ -1998,7 +2012,7 @@ function getVariableName(variableName, propertyNameMap) {
     );
   }
 
-  return propertyNameMap[variableName];
+  return variableSubstitutionMap[variableName];
 }
 
 /**
@@ -2007,7 +2021,7 @@ function getVariableName(variableName, propertyNameMap) {
 Expression.NULL_SENTINEL = "czm_infinity"; // null just needs to be some sentinel value that will cause "[expression] === null" to be false in nearly all cases. GLSL doesn't have a NaN constant so use czm_infinity.
 
 Node.prototype.getShaderExpression = function (
-  propertyNameMap,
+  variableSubstitutionMap,
   shaderState,
   parent
 ) {
@@ -2022,23 +2036,45 @@ Node.prototype.getShaderExpression = function (
   if (defined(this._left)) {
     if (Array.isArray(this._left)) {
       // Left can be an array if the type is LITERAL_COLOR or LITERAL_VECTOR
-      left = getExpressionArray(this._left, propertyNameMap, shaderState, this);
+      left = getExpressionArray(
+        this._left,
+        variableSubstitutionMap,
+        shaderState,
+        this
+      );
     } else {
-      left = this._left.getShaderExpression(propertyNameMap, shaderState, this);
+      left = this._left.getShaderExpression(
+        variableSubstitutionMap,
+        shaderState,
+        this
+      );
     }
   }
 
   if (defined(this._right)) {
-    right = this._right.getShaderExpression(propertyNameMap, shaderState, this);
+    right = this._right.getShaderExpression(
+      variableSubstitutionMap,
+      shaderState,
+      this
+    );
   }
 
   if (defined(this._test)) {
-    test = this._test.getShaderExpression(propertyNameMap, shaderState, this);
+    test = this._test.getShaderExpression(
+      variableSubstitutionMap,
+      shaderState,
+      this
+    );
   }
 
   if (Array.isArray(this._value)) {
     // For ARRAY type
-    value = getExpressionArray(this._value, propertyNameMap, shaderState, this);
+    value = getExpressionArray(
+      this._value,
+      variableSubstitutionMap,
+      shaderState,
+      this
+    );
   }
 
   switch (type) {
@@ -2046,7 +2082,7 @@ Node.prototype.getShaderExpression = function (
       if (checkFeature(this)) {
         return undefined;
       }
-      return getVariableName(value, propertyNameMap);
+      return getVariableName(value, variableSubstitutionMap);
     case ExpressionNodeType.UNARY:
       // Supported types: +, -, !, Boolean, Number
       if (value === "Boolean") {
@@ -2097,7 +2133,7 @@ Node.prototype.getShaderExpression = function (
       return "(" + test + " ? " + left + " : " + right + ")";
     case ExpressionNodeType.MEMBER:
       if (checkFeature(this._left)) {
-        return getVariableName(right, propertyNameMap);
+        return getVariableName(right, variableSubstitutionMap);
       }
       // This is intended for accessing the components of vector properties. String members aren't supported.
       // Check for 0.0 rather than 0 because all numbers are previously converted to decimals.
@@ -2290,21 +2326,21 @@ Node.prototype.getShaderExpression = function (
   }
 };
 
-function addVariable(variableName, variablesNames) {
-  if (variablesNames.indexOf(variableName) === -1) {
-    variablesNames.push(variableName);
+function addVariable(variable, variables) {
+  if (variables.indexOf(variable) === -1) {
+    variables.push(variable);
   }
 }
 
-function addVariablesInString(string, variableNames) {
+function addVariablesInString(string, variables) {
   var match = variableRegex.exec(string);
   while (match !== null) {
-    addVariable(match[1], variableNames);
+    addVariable(match[1], variables);
     match = variableRegex.exec(string);
   }
 }
 
-Node.prototype.getVariables = function (styleVariables, parent) {
+Node.prototype.getVariables = function (variables, parent) {
   var array;
   var length;
   var i;
@@ -2318,19 +2354,19 @@ Node.prototype.getVariables = function (styleVariables, parent) {
       array = this._left;
       length = array.length;
       for (i = 0; i < length; ++i) {
-        array[i].getVariables(styleVariables, this);
+        array[i].getVariables(variables, this);
       }
     } else {
-      this._left.getVariables(styleVariables, this);
+      this._left.getVariables(variables, this);
     }
   }
 
   if (defined(this._right)) {
-    this._right.getVariables(styleVariables, this);
+    this._right.getVariables(variables, this);
   }
 
   if (defined(this._test)) {
-    this._test.getVariables(styleVariables, this);
+    this._test.getVariables(variables, this);
   }
 
   if (Array.isArray(this._value)) {
@@ -2338,18 +2374,18 @@ Node.prototype.getVariables = function (styleVariables, parent) {
     array = this._value;
     length = array.length;
     for (i = 0; i < length; ++i) {
-      array[i].getVariables(styleVariables, this);
+      array[i].getVariables(variables, this);
     }
   }
 
   switch (type) {
     case ExpressionNodeType.VARIABLE:
       if (!checkFeature(this)) {
-        addVariable(value, styleVariables.variables);
+        addVariable(value, variables);
       }
       break;
     case ExpressionNodeType.VARIABLE_IN_STRING:
-      addVariablesInString(value, styleVariables.variables);
+      addVariablesInString(value, variables);
       break;
     case ExpressionNodeType.LITERAL_STRING:
       if (
@@ -2357,12 +2393,7 @@ Node.prototype.getVariables = function (styleVariables, parent) {
         parent._type === ExpressionNodeType.MEMBER &&
         checkFeature(parent._left)
       ) {
-        addVariable(value, styleVariables.variables);
-      }
-      break;
-    case ExpressionNodeType.BUILTIN_VARIABLE:
-      if (value === "tiles3d_tileset_time") {
-        addVariable(value, styleVariables.builtInVariables);
+        addVariable(value, variables);
       }
       break;
   }

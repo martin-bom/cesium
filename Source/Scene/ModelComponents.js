@@ -64,6 +64,15 @@ function Quantization() {
   /**
    * The component data type of the quantized attribute, e.g. ComponentDatatype.UNSIGNED_SHORT.
    *
+   * <p>
+   * The following component datatypes are not supported:
+   * <ul>
+   *   <li>ComponentDatatype.INT</li>
+   *   <li>ComponentDatatype.UNSIGNED_INT</li>
+   *   <li>ComponentDatatype.DOUBLE</li>
+   * </ul>
+   * </p>
+   *
    * @type {ComponentDatatype}
    * @private
    */
@@ -88,10 +97,7 @@ function Quantization() {
  */
 function Attribute() {
   /**
-   * The attribute name.
-   * <p>
-   * Must be ASCII characters that match the regex [a-zA-Z_][a-zA-Z0-9]*
-   * </p>
+   * The attribute name. Must be unique within the attributes array.
    *
    * @type {String}
    * @private
@@ -99,7 +105,8 @@ function Attribute() {
   this.name = undefined;
 
   /**
-   * The attribute semantic.
+   * The attribute semantic. The combination of semantic and setIndex must be
+   * unique within the attributes array.
    *
    * @type {VertexAttributeSemantic|InstanceAttributeSemantic}
    * @private
@@ -126,6 +133,14 @@ function Attribute() {
    * <p>
    * When the data is quantized the componentDatatype should match the
    * dequantized data, which is typically ComponentDatatype.FLOAT.
+   * </p>
+   * <p>
+   * The following component datatypes are not supported:
+   * <ul>
+   *   <li>ComponentDatatype.INT</li>
+   *   <li>ComponentDatatype.UNSIGNED_INT</li>
+   *   <li>ComponentDatatype.DOUBLE</li>
+   * </ul>
    * </p>
    *
    * @type {ComponentDatatype}

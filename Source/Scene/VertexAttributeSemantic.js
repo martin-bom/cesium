@@ -1,3 +1,5 @@
+import Check from "../Core/Check.js";
+
 /**
  * An enum describing the built-in vertex attribute semantics.
  *
@@ -72,13 +74,47 @@ var VertexAttributeSemantic = {
 };
 
 /**
- * Gets the vertex attribute semantic matching the glTF attribute semantic.
+ * Returns whether the vertex attribute semantic can have a set index.
  *
- * @returns {VertexAttributeSemantic} The vertex attribute semantic, or undefined if there is no match.
+ * @param {VertexAttributeSemantic} semantic The semantic.
+ *
+ * @returns {Boolean} Whether the semantic can have a set index.
+ *
+ * @private
+ */
+VertexAttributeSemantic.hasSetIndex = function (semantic) {
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.string("semantic", semantic);
+  //>>includeEnd('debug');
+
+  switch (semantic) {
+    case VertexAttributeSemantic.POSITION:
+    case VertexAttributeSemantic.NORMAL:
+    case VertexAttributeSemantic.TANGENT:
+      return false;
+    case VertexAttributeSemantic.TEXCOORD:
+    case VertexAttributeSemantic.COLOR:
+    case VertexAttributeSemantic.JOINTS:
+    case VertexAttributeSemantic.WEIGHTS:
+    case VertexAttributeSemantic.FEATURE_ID:
+      return true;
+  }
+};
+
+/**
+ * Gets the vertex attribute semantic matching the glTF semantic.
+ *
+ * @param {String} gltfSemantic The glTF semantic.
+ *
+ * @returns {VertexAttributeSemantic|undefined} The vertex attribute semantic, or undefined if there is no match.
  *
  * @private
  */
 VertexAttributeSemantic.fromGltfSemantic = function (gltfSemantic) {
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.string("gltfSemantic", gltfSemantic);
+  //>>includeEnd('debug');
+
   var semantic = gltfSemantic;
 
   // Strip the set index from the semantic
@@ -115,7 +151,9 @@ VertexAttributeSemantic.fromGltfSemantic = function (gltfSemantic) {
 /**
  * Gets the vertex attribute semantic matching the pnts semantic.
  *
- * @returns {VertexAttributeSemantic} The vertex attribute semantic, or undefined if there is no match.
+ * @param {String} pntsSemantic The pnts semantic.
+ *
+ * @returns {VertexAttributeSemantic|undefined} The vertex attribute semantic, or undefined if there is no match.
  *
  * @private
  */
