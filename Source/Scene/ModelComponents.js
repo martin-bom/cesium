@@ -430,16 +430,6 @@ function Primitive() {
   this.material = undefined;
 
   /**
-   * TODO: what about if this is eventually a custom vertex shader... does this belong in the material?
-   *
-   * The custom shader.
-   *
-   * @type {String}
-   * @private
-   */
-  this.customShader = undefined;
-
-  /**
    * The primitive type, e.g. PrimitiveType.TRIANGLES.
    *
    * @type {PrimitiveType}

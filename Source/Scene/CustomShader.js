@@ -28,6 +28,10 @@ import MetadataType from "./MetadataType.js";
 // TODO: should the retrieved attribute be the quantization type or the regular type?
 // TODO: need to add to the attributeNameMap?
 // TODO: better error message when requireGpu and requireCpu are both true
+// TODO: is CPU required for FLOAT64 and INT64?
+// TODO: what about "meta" property?
+// TODO: What to do about default values: it should be set on the Property struct elsewhere
+// TODO: custom shaders from the user with utf8 property names (including with spaces)
 
 function CustomShader() {
   this.inputs = [];
@@ -753,8 +757,6 @@ CustomShader.fromStyle = function (options) {
   //   * Style uses properties that are not GPU compatible like strings, variable-size arrays, or fixed sized arrays with more than 4 components
   //   * Style uses properties in JsonMetadataTable or BatchTableHierarchy
   //   * Style uses custom evaluate functions, see {@link Cesium3DTileStyle#color}
-  //   * TODO: meta property
-  //   * TODO: float64, int64, etc
   //
   // Situations where GPU styling is required:
   //   * Style uses per-point properties. Large point clouds are generally impractical to style on the CPU.
@@ -1034,7 +1036,7 @@ CustomShader.fromStyle = function (options) {
   }
 
   if (!requireFragShader) {
-    // Prefer vert shader 
+    // Prefer vert shader
     requireVertShader = true;
   }
 
