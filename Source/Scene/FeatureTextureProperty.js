@@ -46,6 +46,20 @@ function FeatureTextureProperty(options) {
 
 Object.defineProperties(FeatureTextureProperty.prototype, {
   /**
+   * The texture.
+   *
+   * @memberof FeatureTextureProperty.prototype
+   * @type {ModelComponents.Texture}
+   * @readonly
+   * @private
+   */
+  texture: {
+    get: function () {
+      return this._texture;
+    },
+  },
+
+  /**
    * Extras in the JSON object.
    *
    * @memberof FeatureTextureProperty.prototype

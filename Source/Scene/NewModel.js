@@ -319,12 +319,12 @@ function getMetadataVertexAttributes(
     var featureTableId = featureIdAttribute.featureTable;
     var featureTable = featureMetadata.getFeatureTable(featureTableId);
     var featureTableClass = featureTable.class;
-    var semantic = featureIdAttribute.semantic;
+    var setIndex = featureIdAttribute.setIndex;
     var divisor = featureIdAttribute.divisor;
     var constant = featureIdAttribute.constant;
     // TODO: what about divisor > 1?
     // TODO: what are the vertex interpolation rules?
-    if (defined(semantic) || divisor !== 1) {
+    if (defined(setIndex) || divisor !== 1) {
       continue;
     }
     var propertyIds = featureTable.getPropertyIds(0);

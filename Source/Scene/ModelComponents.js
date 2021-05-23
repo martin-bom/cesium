@@ -310,15 +310,15 @@ function FeatureIdAttribute() {
   this.featureTableId = undefined;
 
   /**
-   * The semantic of the attribute containing feature IDs.
+   * The set index of feature ID attribute containing feature IDs.
    *
-   * @type {String}
+   * @type {Number}
    * @private
    */
-  this.semantic = undefined;
+  this.setIndex = undefined;
 
   /**
-   * A constant feature ID to use when semantic is undefined.
+   * A constant feature ID to use when setIndex is undefined.
    *
    * @type {Number}
    * @default 0
@@ -327,7 +327,7 @@ function FeatureIdAttribute() {
   this.constant = 0;
 
   /**
-   * The rate at which feature IDs increment when semantic is undefined.
+   * The rate at which feature IDs increment when setIndex is undefined.
    *
    * @type {Number}
    * @default 0

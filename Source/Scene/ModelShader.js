@@ -9,14 +9,12 @@ import oneTimeWarning from "../Core/oneTimeWarning.js";
 import PrimitiveType from "../Core/PrimitiveType.js";
 import RuntimeError from "../Core/RuntimeError.js";
 import AlphaMode from "./AlphaMode.js";
-import AttributeSemantic from "./AttributeSemantic.js";
 import AttributeType from "./AttributeType.js";
 import CustomShader from "./CustomShader.js";
 import Expression from "./Expression.js";
 import InputSemantic from "./InputSemantic.js";
 import InstanceAttributeSemantic from "./InstanceAttributeSemantic.js";
 import MetadataType from "./MetadataType.js";
-import StyleableAttributeSemantic from "./StyleableAttributeSemantic.js";
 import VertexAttributeSemantic from "./VertexAttributeSemantic.js";
 
 var CARTESIAN3_ONE = Object.freeze(new Cartesian3(1.0, 1.0, 1.0));

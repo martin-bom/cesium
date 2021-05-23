@@ -17,6 +17,7 @@ import AttributeType from "./AttributeType.js";
 import Expression from "./Expression.js";
 import InputSemantic from "./InputSemantic.js";
 import MetadataType from "./MetadataType.js";
+import VertexAttributeSemantic from "./VertexAttributeSemantic.js";
 
 // TODO: how to handle type conversions - e.g. in a custom shader or style multiplying an int property by a float property
 // TODO: support enums in custom shader
@@ -32,6 +33,10 @@ import MetadataType from "./MetadataType.js";
 // TODO: what about "meta" property?
 // TODO: What to do about default values: it should be set on the Property struct elsewhere
 // TODO: custom shaders from the user with utf8 property names (including with spaces)
+// TODO: if custom shader sets point size does it have to be in the vertex shader?
+// TODO: what to do if custom shader uses a string property?
+// TODO: throw error if custom shader uses a vertex attribute that doesn't exist
+// TODO: need to rename texCoord to setIndex in a lot of places (see ModelComponents.Texture)
 
 function CustomShader() {
   this.inputs = [];
@@ -56,6 +61,8 @@ function StyleInfo() {
 function PropertyInfo(options) {
   this.propertyId = options.propertyId;
   this.classProperty = options.classProperty;
+  this.featureIdAttribute = options.featureIdAttribute;
+  this.featureIdTexture = options.featureIdTexture;
   this.featureTable = options.featureTable;
   this.featureTexture = options.featureTexture;
   this.tileMetadata = options.tileMetadata;
@@ -150,9 +157,9 @@ function getFinalShaderString(
   }
   var uniformStruct = getStructDefinition("Uniform", uniformDefinitions);
 
-  var propertyDefinitions = properties.map(function (propertyInfo) {
-    var type = propertyInfo.classProperty.getShaderType();
-    var propertyId = propertyInfo.propertyId;
+  var propertyDefinitions = properties.map(function (property) {
+    var type = property.classProperty.getShaderType();
+    var propertyId = property.propertyId;
     var name = defaultValue(propertyNameMap[propertyId], propertyId);
     return type + " " + name;
   });
@@ -220,6 +227,46 @@ function getAttributeWithName(primitive, name) {
   return undefined;
 }
 
+function getTexCoordUsedByProperty(primitive, property) {
+  var propertyId = property.propertyId;
+  var featureTexture = property.featureTexture;
+  var featureIdTexture = property.featureIdTexture;
+  var texture;
+  if (defined(featureTexture)) {
+    var featureTextureProperty = featureTexture.getProperty(propertyId);
+    if (defined(featureTextureProperty)) {
+      texture = featureTextureProperty.texture;
+    }
+  } else if (defined(featureIdTexture)) {
+    texture = featureIdTexture.texture;
+  }
+
+  if (defined(texture)) {
+    var setIndex = texture.texCoord;
+    return getAttributeWithSemantic(
+      primitive,
+      VertexAttributeSemantic.TEXCOORD,
+      setIndex
+    );
+  }
+
+  return undefined;
+}
+
+function getFeatureIdUsedByProperty(primitive, property) {
+  var featureIdAttribute = property.featureIdAttribute;
+  if (defined(featureIdAttribute)) {
+    var setIndex = featureIdAttribute.setIndex;
+    return getAttributeWithSemantic(
+      primitive,
+      VertexAttributeSemantic.FEATURE_ID,
+      setIndex
+    );
+  }
+
+  return undefined;
+}
+
 function isPropertyGpuCompatible(classProperty) {
   var type = classProperty.type;
   var valueType = classProperty.valueType;
@@ -282,7 +329,7 @@ function getPropertyInfo(propertyName, primitive, featureMetadata, content) {
   var i;
   var featureTableId;
   var featureTable;
-  var propertyInfo;
+  var property;
   var classProperty;
 
   // Check if the property exists in a feature table referenced by a feature ID attribute
@@ -292,18 +339,19 @@ function getPropertyInfo(propertyName, primitive, featureMetadata, content) {
     var featureIdAttribute = featureIdAttributes[i];
     featureTableId = featureIdAttribute.featureTableId;
     featureTable = featureMetadata.getFeatureTable(featureTableId);
-    propertyInfo = getPropertyInfoFromFeatureTable(propertyName, featureTable);
-    if (defined(propertyInfo)) {
+    property = getPropertyInfoFromFeatureTable(propertyName, featureTable);
+    if (defined(property)) {
       // Requires GPU styling if the model has per-point or per-vertex features
       // since this data is transferred to the GPU and generally impractical
       // to style on the CPU efficiently. This could change in the future with
       // vector data point features.
       var hasPerVertexMetadata = featureIdAttribute.divisor === 1;
-      propertyInfo.requireGpu = hasPerVertexMetadata;
-      propertyInfo.requireFragShader =
+      property.featureIdAttribute = featureIdAttribute;
+      property.requireGpu = hasPerVertexMetadata;
+      property.requireFragShader =
         hasPerVertexMetadata &&
         primitive.primitiveType !== PrimitiveType.POINTS;
-      return propertyInfo;
+      return property;
     }
   }
 
@@ -314,10 +362,11 @@ function getPropertyInfo(propertyName, primitive, featureMetadata, content) {
     var featureIdTexture = featureIdTextures[i];
     featureTableId = featureIdTexture.featureTableId;
     featureTable = featureMetadata.getFeatureTable(featureTableId);
-    propertyInfo = getPropertyInfoFromFeatureTable(propertyName, featureTable);
-    if (defined(propertyInfo)) {
-      propertyInfo.requireFragShader = true;
-      return propertyInfo;
+    property = getPropertyInfoFromFeatureTable(propertyName, featureTable);
+    if (defined(property)) {
+      property.featureIdTexture = featureIdTexture;
+      property.requireFragShader = true;
+      return property;
     }
   }
 
@@ -425,10 +474,10 @@ function hasProperty(properties, property) {
 function getInputsUsedInShader(
   shaderString,
   primitive,
+  inputs,
+  attributes,
   variableSubstitutionMap
 ) {
-  var inputs = [];
-
   var regex = /input\.(\w+)/;
   var match = regex.exec(shaderString);
 
@@ -454,57 +503,32 @@ function getInputsUsedInShader(
         if (!hasInput(inputs, input)) {
           inputs.push(input);
         }
+        if (!hasAttribute(attributes, attribute)) {
+          attributes.push(attribute);
+        }
       }
     }
     match = regex.exec(shaderString);
   }
-
-  return inputs;
 }
 
-function getAttributesUsedInShader(shaderString, primitive) {
-  var attribute;
-  var attributes = [];
-
-  var regex = /input\.(\w+)/;
+function getAttributesUsedInShader(shaderString, primitive, attributes) {
+  var regex = /attribute\.(\w+)/;
   var match = regex.exec(shaderString);
 
   while (match !== null) {
-    var inputName = match[1];
-    var input = InputSemantic.fromVariableName(inputName);
-    if (defined(input)) {
-      attribute = getAttributeWithSemantic(
-        primitive,
-        input.vertexAttributeSemantic,
-        input.setIndex
-      );
-      if (defined(attribute) && !hasAttribute(attributes, attribute)) {
-        attributes.push(attribute);
-      }
-    }
-    match = regex.exec(shaderString);
-  }
-
-  regex = /attribute\.(\w+)/;
-  match = regex.exec(shaderString);
-
-  while (match !== null) {
     var attributeName = match[1];
-    attribute = getAttributeWithName(primitive, attributeName);
+    var attribute = getAttributeWithName(primitive, attributeName);
     if (defined(attribute) && !hasAttribute(attributes, attribute)) {
       attributes.push(attribute);
     }
     match = regex.exec(shaderString);
   }
-
-  return attributes;
 }
 
-function getUniformsUsedInShader(shaderString, uniformMap) {
-  var uniforms = {};
-
+function getUniformsUsedInShader(shaderString, uniformMap, uniforms) {
   if (!defined(uniformMap)) {
-    return uniforms;
+    return;
   }
 
   var regex = /uniform\.(\w+)/;
@@ -517,20 +541,18 @@ function getUniformsUsedInShader(shaderString, uniformMap) {
     }
     match = regex.exec(shaderString);
   }
-
-  return uniforms;
 }
 
 function getPropertiesUsedInShader(
   shaderString,
   primitive,
   featureMetadata,
-  content
+  content,
+  attributes,
+  properties
 ) {
-  var properties = [];
-
   if (!defined(featureMetadata)) {
-    return properties;
+    return;
   }
 
   var regex = /property\.(\w+)/;
@@ -546,12 +568,20 @@ function getPropertiesUsedInShader(
     );
     if (!hasProperty(properties, property)) {
       properties.push(property);
+
+      var texCoord = getTexCoordUsedByProperty(primitive, property);
+      if (defined(texCoord) && !hasAttribute(attributes, texCoord)) {
+        attributes.push(texCoord);
+      }
+
+      var featureId = getFeatureIdUsedByProperty(primitive, property);
+      if (defined(featureId) && !hasAttribute(attributes, featureId)) {
+        attributes.push(featureId);
+      }
     }
 
     match = regex.exec(shaderString);
   }
-
-  return properties;
 }
 
 CustomShader.fromShaderString = function (options) {
@@ -567,20 +597,28 @@ CustomShader.fromShaderString = function (options) {
   Check.typeOf.object("options.primitive", primitive);
   //>>includeEnd('debug');
 
+  var inputs = [];
+  var attributes = [];
+  var uniforms = [];
+  var properties = [];
   var variableSubstitutionMap = {};
 
-  var inputs = getInputsUsedInShader(
+  getInputsUsedInShader(
     shaderString,
     primitive,
+    inputs,
+    attributes,
     variableSubstitutionMap
   );
-  var attributes = getAttributesUsedInShader(shaderString, primitive);
-  var uniforms = getUniformsUsedInShader(shaderString, uniformMap);
-  var properties = getPropertiesUsedInShader(
+  getAttributesUsedInShader(shaderString, primitive, attributes);
+  getUniformsUsedInShader(shaderString, uniformMap, uniforms);
+  getPropertiesUsedInShader(
     shaderString,
     primitive,
     featureMetadata,
-    content
+    content,
+    attributes,
+    properties
   );
 
   for (var oldName in variableSubstitutionMap) {
@@ -711,6 +749,7 @@ function parseVariableAsProperty(
   primitive,
   featureMetadata,
   content,
+  attributes,
   properties,
   variableSubstitutionMap,
   propertyNameMap
@@ -719,23 +758,28 @@ function parseVariableAsProperty(
     return false;
   }
 
-  var propertyInfo = getPropertyInfo(
-    variable,
-    primitive,
-    featureMetadata,
-    content
-  );
+  var property = getPropertyInfo(variable, primitive, featureMetadata, content);
 
-  if (!defined(propertyInfo)) {
+  if (!defined(property)) {
     return false;
   }
 
   if (!hasProperty(properties, variable)) {
-    properties.push(propertyInfo);
-    var propertyId = propertyInfo.propertyId;
+    properties.push(property);
+    var propertyId = property.propertyId;
     var glslName = getGlslName(propertyId, variableId);
     propertyNameMap[propertyId] = glslName;
     variableSubstitutionMap[variable] = "property." + glslName;
+
+    var texCoord = getTexCoordUsedByProperty(primitive, property);
+    if (defined(texCoord) && !hasAttribute(attributes, texCoord)) {
+      attributes.push(texCoord);
+    }
+
+    var featureId = getFeatureIdUsedByProperty(primitive, property);
+    if (defined(featureId) && !hasAttribute(attributes, featureId)) {
+      attributes.push(featureId);
+    }
   }
 
   return true;
@@ -860,6 +904,7 @@ CustomShader.fromStyle = function (options) {
         primitive,
         featureMetadata,
         content,
+        attributes,
         properties,
         variableSubstitutionMap,
         propertyNameMap
@@ -885,14 +930,14 @@ CustomShader.fromStyle = function (options) {
   var propertiesLength = properties.length;
   for (i = 0; i < propertiesLength; ++i) {
     // Check if properties require CPU or GPU styling
-    var propertyInfo = properties[i];
-    requireCpu = requireCpu || propertyInfo.requireCpu;
-    requireGpu = requireGpu || propertyInfo.requireGpu;
-    requireVertShader = requireVertShader || propertyInfo.requireVertShader;
-    requireFragShader = requireFragShader || propertyInfo.requireFragShader;
+    var property = properties[i];
+    requireCpu = requireCpu || property.requireCpu;
+    requireGpu = requireGpu || property.requireGpu;
+    requireVertShader = requireVertShader || property.requireVertShader;
+    requireFragShader = requireFragShader || property.requireFragShader;
 
     // Gather the feature table IDs in use
-    var featureTableId = propertyInfo.featureTableId;
+    var featureTableId = property.featureTableId;
     if (defined(featureTableId)) {
       if (featureTableIds.indexOf(featureTableId) === -1) {
         featureTableIds.push(featureTableId);
@@ -1023,21 +1068,11 @@ CustomShader.fromStyle = function (options) {
       customShader.shaderString = shaderString;
     }
   }
-  if (!requireGpu) {
-    // Prefer CPU styling.
-    // CPU styling is faster if feature properties aren't changing frequently.
-    requireCpu = true;
-  }
 
   if (requireCpu && ContextLimits.maximumVertexTextureImageUnits === 0) {
     // If vertex texture fetch is not supported the batch texture needs to be
     // applied in the frag shader
     requireFragShader = true;
-  }
-
-  if (!requireFragShader) {
-    // Prefer vert shader
-    requireVertShader = true;
   }
 
   if (requireCpu && requireGpu) {
